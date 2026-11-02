@@ -1077,6 +1077,16 @@ try/catch-wrapped, and a refused write still leaves the snapshot in memory for
 this page. Reads hand back the same object every time, which is what
 `useSyncExternalStore` needs to avoid re-render loops.
 
+Every column and filter combination opened writes its own key, so a long
+session would otherwise pile them up until the tab's storage quota refused new
+ones. Each write prunes the others: of the snapshots under the prefix, in
+sessionStorage or only in memory (after a refused write), the most recent
+`MAX_STORED_SCREENING_QUEUES` (10) by `createdAt` stay, counting the one just
+written, which is always kept. Entries that no longer parse sort as oldest and
+go first. A pruned key leaves memory and sessionStorage together, so the two
+never disagree, and listing or removing keys is try/catch-wrapped like every
+other access.
+
 **Written synchronously on click, before navigation.** The board's card click
 handler builds the snapshot with `createScreeningQueue`, from the same
 `orderedBoardCandidates` + `columnCandidates` pair the board renders its columns
@@ -1141,7 +1151,8 @@ across `[candidateId]` and mounts `ScreeningSessionProvider`, which reads the
 route's params and search params, the already-cached profile (for its stages and
 position), and `useScreeningQueue`. `useScreeningSession()` returns
 `{ queue, rows, progress, neighbours, context, stageName, allDone, moveAndAdvance }`,
-or `null` in every fallback case, and the page uses it when it is there. The
+or `null` in every fallback case, and the page uses it when it is there (and
+then skips ordering the whole board for the live walk it would discard). The
 provider is wrapped in `Suspense` because a layout that calls `useSearchParams`
 needs one to build.
 

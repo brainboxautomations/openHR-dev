@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { forgetCollapsedPreferencesInMemory } from "@/hooks/use-collapsed-preference";
 import { ToastProvider } from "@/providers/toast-provider";
+import { orderedBoardCandidates } from "@/utilities/candidate-navigation";
 import {
   forgetScreeningQueuesInMemory,
   readScreeningQueue,
@@ -49,6 +50,11 @@ vi.mock("@/services/candidates-service", () => ({
     listByPosition: harness.listByPosition,
   },
 }));
+
+vi.mock("@/utilities/candidate-navigation", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/utilities/candidate-navigation")>();
+  return { ...actual, orderedBoardCandidates: vi.fn(actual.orderedBoardCandidates) };
+});
 
 vi.mock("@/services/people-service", () => ({
   PeopleService: { update: harness.updatePerson },
@@ -683,6 +689,20 @@ describe("CandidateProfilePage walking a board column", () => {
     expect(new URL(href, "http://localhost").searchParams.get("returnTo")).toBe(
       profileHref("application-1"),
     );
+  });
+
+  it("does not order the whole board while walking a snapshot", async () => {
+    const user = userEvent.setup();
+    snapshot(["application-0", "application-1", "application-2"]);
+    await renderInLayout();
+    await screen.findByText("Applied · 2 of 3 · 3 left");
+    vi.mocked(orderedBoardCandidates).mockClear();
+
+    await moveToShortlist(user);
+    await waitFor(() => expect(harness.listByPosition).toHaveBeenCalledTimes(2));
+    await screen.findByText("Applied · 2 of 3 · 2 left");
+
+    expect(orderedBoardCandidates).not.toHaveBeenCalled();
   });
 
   it("keeps both arrows after the candidate is moved out of the filtered column", async () => {

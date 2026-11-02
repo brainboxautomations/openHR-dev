@@ -205,8 +205,10 @@ function ProfileView({
 
   const boardCandidates = useCandidates(navigationContext?.positionId ?? null);
 
+  const hasScreeningSession = screeningSession !== null;
+
   const boardNeighbours = useMemo(() => {
-    if (!navigationContext) return NO_NEIGHBOURS;
+    if (!navigationContext || hasScreeningSession) return NO_NEIGHBOURS;
 
     const ordered = orderedBoardCandidates(
       boardCandidates.data ?? [],
@@ -219,7 +221,7 @@ function ProfileView({
       ordered.map((candidate) => candidate.id),
       applicationId,
     );
-  }, [navigationContext, boardCandidates.data, stages, applicationId]);
+  }, [navigationContext, hasScreeningSession, boardCandidates.data, stages, applicationId]);
 
   const navigatorContext = screeningSession?.context ?? navigationContext;
   const neighbours = screeningSession?.neighbours ?? boardNeighbours;
