@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 
 import { useNavigate } from "@/hooks/use-navigate";
 import {
   candidateHref,
+  candidateNavigationSearch,
   type CandidateNavigationContext,
   type CandidateNeighbours,
 } from "@/utilities/candidate-navigation";
@@ -64,6 +65,14 @@ export function useQueueShortcuts(session: QueueShortcutsSession | null): void {
   const previousId = session?.neighbours.previousId ?? null;
   const nextId = session?.neighbours.nextId ?? null;
   const context = session?.context ?? null;
+  const position = context
+    ? [previousId, nextId, candidateNavigationSearch(context)].join("|")
+    : null;
+  const navigating = useRef(false);
+
+  useEffect(() => {
+    navigating.current = false;
+  }, [position]);
 
   useEffect(() => {
     if (!context) return;
@@ -77,6 +86,8 @@ export function useQueueShortcuts(session: QueueShortcutsSession | null): void {
       if (!targetId || shouldIgnore(event)) return;
 
       event.preventDefault();
+      if (navigating.current) return;
+      navigating.current = true;
       push(candidateHref(targetId, context));
     };
 

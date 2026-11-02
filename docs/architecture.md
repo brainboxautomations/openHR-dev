@@ -1244,6 +1244,15 @@ the other popovers built on it have no ARIA role of their own. Without that
 check, pressing J with the stage menu open would leave the menu's candidate
 behind mid-decision.
 
+Once a shortcut has navigated, further presses are swallowed until the
+neighbours or the context change, that is, until the next candidate is the
+current one. Until the route changes the arrows still point at the same
+candidate, so pressing J twice quickly used to push the same link twice. The
+guard is a ref reset by an effect on a key built from the neighbours and the
+context's query string, not on the listener's effect, which also re-runs when
+`useNavigate` re-renders mid-transition; arriving on a candidate by any other
+route (an arrow, the panel, Back) clears it the same way.
+
 ### Toasts: one at a time, mounted in the app shell
 
 `ToastProvider` (`providers/toast-provider.tsx`) is mounted in

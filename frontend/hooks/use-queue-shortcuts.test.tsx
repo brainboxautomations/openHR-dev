@@ -62,6 +62,47 @@ describe("useQueueShortcuts", () => {
     expect(harness.push).toHaveBeenCalledWith(href);
   });
 
+  it("ignores further presses until the next candidate is on screen", async () => {
+    const user = userEvent.setup();
+    render(<Harness neighbours={BOTH} />);
+
+    await user.keyboard("jj{ArrowRight}k");
+
+    expect(harness.push).toHaveBeenCalledTimes(1);
+    expect(harness.push).toHaveBeenCalledWith(NEXT_HREF);
+  });
+
+  it("listens again once the current candidate has changed", async () => {
+    const user = userEvent.setup();
+    const view = render(<Harness neighbours={BOTH} />);
+    await user.keyboard("j");
+
+    view.rerender(
+      <Harness neighbours={{ previousId: "application-2", nextId: "application-4" }} />,
+    );
+    await user.keyboard("j");
+
+    expect(harness.push).toHaveBeenCalledTimes(2);
+    expect(harness.push).toHaveBeenLastCalledWith(
+      "/candidates/application-4?position=position-1&queue=stage-1",
+    );
+  });
+
+  it("listens again on a candidate it left by shortcut and came back to another way", async () => {
+    const user = userEvent.setup();
+    const view = render(<Harness neighbours={BOTH} />);
+    await user.keyboard("j");
+
+    view.rerender(
+      <Harness neighbours={{ previousId: "application-2", nextId: "application-4" }} />,
+    );
+    view.rerender(<Harness neighbours={BOTH} />);
+    await user.keyboard("j");
+
+    expect(harness.push).toHaveBeenCalledTimes(2);
+    expect(harness.push).toHaveBeenLastCalledWith(NEXT_HREF);
+  });
+
   it("does nothing at either end of the column", async () => {
     const user = userEvent.setup();
     render(<Harness neighbours={{ previousId: null, nextId: null }} />);

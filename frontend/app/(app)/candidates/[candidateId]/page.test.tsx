@@ -856,15 +856,29 @@ describe("CandidateProfilePage walking a board column", () => {
     it("opens the next and previous candidates in the column with J and K", async () => {
       const user = userEvent.setup();
       snapshot(["application-0", "application-1", "application-2"]);
-      await renderInLayout();
+      const { openCandidate } = await renderInLayout();
       await screen.findByText("Applied · 2 of 3 · 3 left");
 
       await user.keyboard("j");
       expect(harness.push).toHaveBeenLastCalledWith(profileHref("application-2"));
 
+      openCandidate("application-2");
+      await screen.findByText("Applied · 3 of 3 · 3 left");
       await user.keyboard("{ArrowLeft}");
-      expect(harness.push).toHaveBeenLastCalledWith(profileHref("application-0"));
+      expect(harness.push).toHaveBeenLastCalledWith(profileHref("application-1"));
       expect(harness.push).toHaveBeenCalledTimes(2);
+    });
+
+    it("opens the next candidate once when J is pressed again before it loads", async () => {
+      const user = userEvent.setup();
+      snapshot(["application-0", "application-1", "application-2"]);
+      await renderInLayout();
+      await screen.findByText("Applied · 2 of 3 · 3 left");
+
+      await user.keyboard("jj");
+
+      expect(harness.push).toHaveBeenCalledTimes(1);
+      expect(harness.push).toHaveBeenCalledWith(profileHref("application-2"));
     });
 
     it("hints at the keys on the arrows", async () => {
