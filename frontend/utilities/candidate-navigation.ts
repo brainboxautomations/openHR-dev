@@ -89,6 +89,10 @@ export function boardStageOrder(stages: PipelineStage[]): PipelineStage[] {
   return [...stages].sort((a, b) => a.sortOrder - b.sortOrder);
 }
 
+export function columnCandidates(visible: Candidate[], stageId: string): Candidate[] {
+  return visible.filter((candidate) => candidate.stageId === stageId);
+}
+
 export function orderedBoardCandidates(
   candidates: Candidate[],
   stages: PipelineStage[],
@@ -100,7 +104,7 @@ export function orderedBoardCandidates(
 
   const ordered: Candidate[] = [];
   for (const stage of stages) {
-    ordered.push(...visible.filter((candidate) => candidate.stageId === stage.id));
+    ordered.push(...columnCandidates(visible, stage.id));
   }
 
   const unstaged = visible.filter(

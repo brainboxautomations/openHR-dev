@@ -38,6 +38,7 @@ import {
 } from "@/utilities/candidate-filters";
 import {
   boardStageOrder,
+  columnCandidates,
   orderedBoardCandidates,
   type CandidateNavigationContext,
 } from "@/utilities/candidate-navigation";
@@ -143,7 +144,7 @@ export function PipelineBoardScreen({ positionId }: { positionId: string }) {
       ? `A bulk action covers at most ${MAX_BULK_SELECTION} candidates at a time. ${selected.size} of the ${visible.length} in this view are selected — narrow the filters and run it again for the rest.`
       : null;
 
-  const byStage = (stageId: string) => visible.filter((c) => c.stageId === stageId);
+  const byStage = (stageId: string) => columnCandidates(visible, stageId);
   const activeCount = boardStages.reduce((n, s) => n + byStage(s.id).length, 0);
 
   const replaceSelection = (ids: Iterable<string>) => setSelectionOverride(new Set(ids));

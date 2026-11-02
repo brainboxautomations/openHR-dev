@@ -6,6 +6,7 @@ import {
   boardStageOrder,
   candidateHref,
   candidateNavigationSearch,
+  columnCandidates,
   neighbouringCandidates,
   orderedBoardCandidates,
   parseCandidateNavigationContext,
@@ -137,6 +138,41 @@ describe("orderedBoardCandidates", () => {
     );
 
     expect(ordered.map((c) => c.id)).toEqual(["c-starred"]);
+  });
+});
+
+describe("columnCandidates", () => {
+  it("keeps only the candidates in the named column, in the order it was given", () => {
+    const visible = [
+      candidate({ id: "c-applied-newest", stageId: "stage-1" }),
+      candidate({ id: "c-shortlist", stageId: "stage-2" }),
+      candidate({ id: "c-applied-oldest", stageId: "stage-1" }),
+    ];
+
+    expect(columnCandidates(visible, "stage-1").map((c) => c.id)).toEqual([
+      "c-applied-newest",
+      "c-applied-oldest",
+    ]);
+  });
+
+  it("is empty for a column nobody is in", () => {
+    expect(columnCandidates([candidate({ stageId: "stage-1" })], "stage-4")).toEqual([]);
+  });
+
+  it("never picks up a candidate with no stage", () => {
+    expect(columnCandidates([candidate({ stageId: null })], "stage-1")).toEqual([]);
+  });
+
+  it("matches the slice of the board walk that belongs to that column", () => {
+    const cards = [
+      candidate({ id: "c-1", stageId: "stage-2" }),
+      candidate({ id: "c-2", stageId: "stage-1" }),
+      candidate({ id: "c-3", stageId: "stage-2", starred: true }),
+      candidate({ id: "c-4", stageId: "stage-1", archived: true }),
+    ];
+    const visible = orderedBoardCandidates(cards, boardStageOrder(STAGES), filters(), NOW);
+
+    expect(columnCandidates(visible, "stage-2").map((c) => c.id)).toEqual(["c-1", "c-3"]);
   });
 });
 
