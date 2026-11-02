@@ -44,6 +44,7 @@ export function createScreeningQueue({
   stages,
   filters,
   now,
+  alwaysInclude = null,
 }: {
   positionId: string;
   stageId: string;
@@ -51,15 +52,20 @@ export function createScreeningQueue({
   stages: PipelineStage[];
   filters: CandidateFilters;
   now: Date;
+  alwaysInclude?: string | null;
 }): ScreeningQueue {
   const visible = orderedBoardCandidates(candidates, boardStageOrder(stages), filters, now);
+  const kept = new Set(columnCandidates(visible, stageId).map((candidate) => candidate.id));
+  if (alwaysInclude) kept.add(alwaysInclude);
 
   return {
     version: 1,
     positionId,
     stageId,
     includeArchived: filters.includeArchived,
-    applicationIds: columnCandidates(visible, stageId).map((candidate) => candidate.id),
+    applicationIds: columnCandidates(candidates, stageId)
+      .filter((candidate) => kept.has(candidate.id))
+      .map((candidate) => candidate.id),
     createdAt: now.toISOString(),
   };
 }

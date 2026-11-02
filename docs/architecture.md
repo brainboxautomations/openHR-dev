@@ -1092,6 +1092,16 @@ the store, and the next render picks it up. A 12-hour-old pass is not worth
 resuming, and its list of who was "in Applied" is no longer what the recruiter
 remembers.
 
+A rebuild always keeps the candidate on screen (`alwaysInclude` on
+`createScreeningQueue`) when they are in the queued column, even if they no
+longer match the filters, at their board-order place in the column. The URL's
+filters are the board's, and opening a card changes what the card matches:
+under "Unseen only" the card was marked seen on the way in, and under "Starred
+only" it may have been unstarred since. Without this, a Cmd-clicked card or a
+pasted link rebuilt a list without the current candidate, the session fell back
+and the panel and count disappeared. Someone who has left the column is still
+not added, so a link to a moved candidate falls back as before.
+
 **Pending.** A snapshot row is _pending_ when the candidate is still in the
 queued stage and, unless archived candidates were on show when the snapshot was
 taken, not archived. Archiving counts as handled. Rows are read live

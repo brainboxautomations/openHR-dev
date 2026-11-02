@@ -127,6 +127,71 @@ describe("createScreeningQueue", () => {
     expect(created.includeArchived).toBe(true);
     expect(created.applicationIds).toEqual(["archived"]);
   });
+
+  it("keeps the candidate it must always include, in their place in the column", () => {
+    const created = createScreeningQueue({
+      positionId: "position-1",
+      stageId: "stage-1",
+      candidates: [
+        candidate({ id: "a-unseen-1", seen: false }),
+        candidate({ id: "a-current", seen: true }),
+        candidate({ id: "s-unseen", stageId: "stage-2", seen: false }),
+        candidate({ id: "a-seen", seen: true }),
+        candidate({ id: "a-unseen-2", seen: false }),
+      ],
+      stages: STAGES,
+      filters: filters({ unseenOnly: true }),
+      now: NOW,
+      alwaysInclude: "a-current",
+    });
+
+    expect(created.applicationIds).toEqual(["a-unseen-1", "a-current", "a-unseen-2"]);
+  });
+
+  it("keeps an always-included candidate who no longer matches any filter", () => {
+    const created = createScreeningQueue({
+      positionId: "position-1",
+      stageId: "stage-1",
+      candidates: [
+        candidate({ id: "a-current", starred: false, archived: true }),
+        candidate({ id: "a-starred", starred: true }),
+      ],
+      stages: STAGES,
+      filters: filters({ starredOnly: true }),
+      now: NOW,
+      alwaysInclude: "a-current",
+    });
+
+    expect(created.applicationIds).toEqual(["a-current", "a-starred"]);
+  });
+
+  it("does not pull an always-included candidate in from another column", () => {
+    const created = createScreeningQueue({
+      positionId: "position-1",
+      stageId: "stage-1",
+      candidates: [candidate({ id: "a-1" }), candidate({ id: "s-current", stageId: "stage-2" })],
+      stages: STAGES,
+      filters: filters(),
+      now: NOW,
+      alwaysInclude: "s-current",
+    });
+
+    expect(created.applicationIds).toEqual(["a-1"]);
+  });
+
+  it("ignores an always-included id that is not on the board", () => {
+    const created = createScreeningQueue({
+      positionId: "position-1",
+      stageId: "stage-1",
+      candidates: [candidate({ id: "a-1" })],
+      stages: STAGES,
+      filters: filters(),
+      now: NOW,
+      alwaysInclude: "gone",
+    });
+
+    expect(created.applicationIds).toEqual(["a-1"]);
+  });
 });
 
 describe("screeningQueueKey", () => {

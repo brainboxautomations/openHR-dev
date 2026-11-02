@@ -713,6 +713,31 @@ describe("CandidateProfilePage walking a board column", () => {
     ]);
   });
 
+  it("keeps the current candidate when a rebuild under Unseen only would leave them out", async () => {
+    const search = "position=position-1&unseen=1&queue=stage-1";
+    harness.searchParams = new URLSearchParams(search);
+    board = [
+      boardCandidate("application-0", { seen: false }),
+      boardCandidate("application-1", { seen: true }),
+      boardCandidate("application-2", { seen: false }),
+    ];
+    await renderInLayout();
+
+    expect(await screen.findByText("Applied · 2 of 3 · 3 left")).toBeInTheDocument();
+    expect(arrow("Previous candidate")).toHaveAttribute(
+      "href",
+      `/candidates/application-0?${search}`,
+    );
+    expect(arrow("Next candidate")).toHaveAttribute("href", `/candidates/application-2?${search}`);
+    expect(screen.getByRole("navigation", { name: "Screening list" })).toBeInTheDocument();
+    forgetScreeningQueuesInMemory();
+    expect(readScreeningQueue(`openhr:screening-queue:${search}`)?.applicationIds).toEqual([
+      "application-0",
+      "application-1",
+      "application-2",
+    ]);
+  });
+
   it("rebuilds a snapshot older than twelve hours", async () => {
     writeScreeningQueue(QUEUE_KEY, {
       version: 1,

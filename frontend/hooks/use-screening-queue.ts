@@ -87,9 +87,10 @@ export function useScreeningQueue({
         stages,
         filters: queueContext.filters,
         now: new Date(),
+        alwaysInclude: applicationId,
       }),
     );
-  }, [needsSnapshot, key, queueContext, queueStage, live, stages]);
+  }, [needsSnapshot, key, queueContext, queueStage, live, stages, applicationId]);
 
   return useMemo(() => {
     if (!usable || !stored || !queueContext || !queueStage || !live || !stages) return null;
