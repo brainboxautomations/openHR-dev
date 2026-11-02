@@ -221,6 +221,36 @@ describe("candidate navigation context round-trips through the query string", ()
     expect(parsed?.filters.addedWithin).toBe("any");
   });
 
+  it("carries the column a card was opened from as the queue", () => {
+    const search = candidateNavigationSearch({
+      positionId: "position-1",
+      filters: filters({ starredOnly: true }),
+      queueStageId: "stage-2",
+    });
+
+    expect(search).toBe("position=position-1&starred=1&queue=stage-2");
+    expect(parseCandidateNavigationContext(new URLSearchParams(search))?.queueStageId).toBe(
+      "stage-2",
+    );
+  });
+
+  it("reads no queue when the link was not opened from a column", () => {
+    const parsed = parseCandidateNavigationContext(new URLSearchParams("position=position-1"));
+
+    expect(parsed).not.toHaveProperty("queueStageId");
+  });
+
+  it("serialises the same context to the same string after a round trip", () => {
+    const search = candidateNavigationSearch({
+      positionId: "position-1",
+      filters: filters({ search: "  amara ", stageIds: new Set(["stage-2", "stage-1"]) }),
+      queueStageId: "stage-1",
+    });
+    const reparsed = parseCandidateNavigationContext(new URLSearchParams(search));
+
+    expect(candidateNavigationSearch(reparsed!)).toBe(search);
+  });
+
   it("builds a profile link that carries the board's context", () => {
     const href = candidateHref("application-9", {
       positionId: "position-1",

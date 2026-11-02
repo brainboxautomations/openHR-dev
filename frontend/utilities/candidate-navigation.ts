@@ -15,6 +15,7 @@ const UNSEEN_PARAM = "unseen";
 const ARCHIVED_PARAM = "archived";
 const ADDED_PARAM = "added";
 const ACTIVITY_PARAM = "activity";
+const QUEUE_PARAM = "queue";
 
 const ON = "1";
 
@@ -23,6 +24,7 @@ const DATE_WINDOWS: DateWindow[] = ["any", "7", "30", "90"];
 export type CandidateNavigationContext = {
   positionId: string;
   filters: CandidateFilters;
+  queueStageId?: string;
 };
 
 export type CandidateNeighbours = {
@@ -39,7 +41,7 @@ function toDateWindow(raw: string | null): DateWindow {
 
 export function candidateNavigationSearch(context: CandidateNavigationContext): string {
   const params = new URLSearchParams();
-  const { positionId, filters } = context;
+  const { positionId, filters, queueStageId } = context;
 
   params.set(POSITION_PARAM, positionId);
 
@@ -54,6 +56,7 @@ export function candidateNavigationSearch(context: CandidateNavigationContext): 
   if (filters.includeArchived) params.set(ARCHIVED_PARAM, ON);
   if (filters.addedWithin !== "any") params.set(ADDED_PARAM, filters.addedWithin);
   if (filters.lastActivityWithin !== "any") params.set(ACTIVITY_PARAM, filters.lastActivityWithin);
+  if (queueStageId) params.set(QUEUE_PARAM, queueStageId);
 
   return params.toString();
 }
@@ -69,9 +72,11 @@ export function parseCandidateNavigationContext(
   if (!positionId) return null;
 
   const stages = params.get(STAGES_PARAM);
+  const queueStageId = params.get(QUEUE_PARAM);
 
   return {
     positionId,
+    ...(queueStageId ? { queueStageId } : {}),
     filters: {
       ...emptyCandidateFilters(),
       search: params.get(SEARCH_PARAM) ?? "",
