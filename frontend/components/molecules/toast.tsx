@@ -53,8 +53,6 @@ export function Toast({
 
   return (
     <div
-      role="status"
-      aria-live="polite"
       onMouseEnter={() => onHoverChange(true)}
       onMouseLeave={() => onHoverChange(false)}
       onFocus={() => onFocusChange(true)}

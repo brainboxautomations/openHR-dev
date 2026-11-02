@@ -23,18 +23,43 @@ function advance(ms: number) {
   act(() => void vi.advanceTimersByTime(ms));
 }
 
+function liveRegion() {
+  return screen.getByRole("status");
+}
+
+function shownToast() {
+  const toast = liveRegion().firstElementChild;
+  expect(toast).not.toBeNull();
+  return toast as HTMLElement;
+}
+
+function expectNoToast() {
+  expect(liveRegion()).toBeEmptyDOMElement();
+}
+
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());
 
 describe("ToastProvider", () => {
-  it("shows the message in a polite live region", () => {
+  it("keeps an empty polite live region on the page before any toast is shown", () => {
     renderWithToasts();
+
+    const region = liveRegion();
+    expect(region).toHaveAttribute("aria-live", "polite");
+    expect(region).toHaveAttribute("aria-atomic", "true");
+    expect(region).toBeEmptyDOMElement();
+  });
+
+  it("shows the message inside that same live region, so it is announced", () => {
+    renderWithToasts();
+    const region = liveRegion();
 
     show({ message: "Moved Jordan Lee to Shortlist" });
 
-    const toast = screen.getByRole("status");
-    expect(toast).toHaveTextContent("Moved Jordan Lee to Shortlist");
-    expect(toast).toHaveAttribute("aria-live", "polite");
+    expect(liveRegion()).toBe(region);
+    expect(region).toHaveTextContent("Moved Jordan Lee to Shortlist");
+    expect(screen.getAllByRole("status")).toHaveLength(1);
+    expect(region.querySelector("[aria-live]")).toBeNull();
   });
 
   it("runs the action once and dismisses the toast", () => {
@@ -45,7 +70,7 @@ describe("ToastProvider", () => {
     fireEvent.click(screen.getByRole("button", { name: "Undo" }));
 
     expect(undo).toHaveBeenCalledTimes(1);
-    expect(screen.queryByRole("status")).toBeNull();
+    expectNoToast();
   });
 
   it("can be dismissed without running the action", () => {
@@ -56,7 +81,7 @@ describe("ToastProvider", () => {
     fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
 
     expect(undo).not.toHaveBeenCalled();
-    expect(screen.queryByRole("status")).toBeNull();
+    expectNoToast();
   });
 
   it("dismisses itself after a few seconds", () => {
@@ -64,10 +89,10 @@ describe("ToastProvider", () => {
     show({ message: "Moved Jordan Lee to Shortlist" });
 
     advance(TOAST_AUTO_DISMISS_MS - 1);
-    expect(screen.getByRole("status")).toBeInTheDocument();
+    expect(liveRegion()).toHaveTextContent("Moved Jordan Lee to Shortlist");
 
     advance(1);
-    expect(screen.queryByRole("status")).toBeNull();
+    expectNoToast();
   });
 
   it("replaces the current toast with a new one, which gets its own full time", () => {
@@ -77,14 +102,14 @@ describe("ToastProvider", () => {
 
     show({ message: "Couldn’t move Sam Rivera", tone: "error" });
 
-    expect(screen.getAllByRole("status")).toHaveLength(1);
-    expect(screen.getByRole("status")).toHaveTextContent("Couldn’t move Sam Rivera");
+    expect(liveRegion()).toHaveTextContent("Couldn’t move Sam Rivera");
+    expect(liveRegion()).not.toHaveTextContent("Moved Jordan Lee");
 
     advance(1000);
-    expect(screen.getByRole("status")).toHaveTextContent("Couldn’t move Sam Rivera");
+    expect(liveRegion()).toHaveTextContent("Couldn’t move Sam Rivera");
 
     advance(TOAST_AUTO_DISMISS_MS - 1000);
-    expect(screen.queryByRole("status")).toBeNull();
+    expectNoToast();
   });
 
   it("waits while the pointer is over it, then finishes the time that was left", () => {
@@ -92,16 +117,16 @@ describe("ToastProvider", () => {
     show({ message: "Moved Jordan Lee to Shortlist" });
     advance(2000);
 
-    fireEvent.mouseEnter(screen.getByRole("status"));
+    fireEvent.mouseEnter(shownToast());
     advance(TOAST_AUTO_DISMISS_MS * 2);
-    expect(screen.getByRole("status")).toBeInTheDocument();
+    expect(liveRegion()).toHaveTextContent("Moved Jordan Lee to Shortlist");
 
-    fireEvent.mouseLeave(screen.getByRole("status"));
+    fireEvent.mouseLeave(shownToast());
     advance(TOAST_AUTO_DISMISS_MS - 2001);
-    expect(screen.getByRole("status")).toBeInTheDocument();
+    expect(liveRegion()).toHaveTextContent("Moved Jordan Lee to Shortlist");
 
     advance(1);
-    expect(screen.queryByRole("status")).toBeNull();
+    expectNoToast();
   });
 
   it("waits while keyboard focus is inside it", () => {
@@ -110,10 +135,10 @@ describe("ToastProvider", () => {
 
     act(() => screen.getByRole("button", { name: "Undo" }).focus());
     advance(TOAST_AUTO_DISMISS_MS * 2);
-    expect(screen.getByRole("status")).toBeInTheDocument();
+    expect(liveRegion()).toHaveTextContent("Moved Jordan Lee to Shortlist");
 
     act(() => screen.getByRole("button", { name: "Undo" }).blur());
     advance(TOAST_AUTO_DISMISS_MS);
-    expect(screen.queryByRole("status")).toBeNull();
+    expectNoToast();
   });
 });

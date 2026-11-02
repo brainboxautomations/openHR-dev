@@ -1256,10 +1256,19 @@ pauses while the pointer is over it or focus is inside it, and resumes with the
 time that was left, so reaching for Undo never races the timer. Running the
 action dismisses the toast, which also makes a double-clicked Undo run once.
 
-`components/molecules/toast.tsx` is `role="status"` with `aria-live="polite"`
-and is keyed per toast, so a replacement is announced. Inline, page-level
-failures still use `ErrorAlert` (`role="alert"`); toasts are for outcomes of
-actions whose page may already be gone.
+The live region is the provider's container, not the toast:
+`role="status"`, `aria-live="polite"` and `aria-atomic="true"` sit on the
+wrapper that is always mounted, and `components/molecules/toast.tsx` carries no
+live-region attributes of its own. Screen readers announce changes inside a
+live region they already know about; a region that is inserted together with
+its text is often not announced at all, so the first toast, and every one after
+a dismissal, would usually have been skipped. Keeping one region also avoids
+nested live regions. The toast is keyed per toast, so a replacement swaps the
+region's content and is announced in full. The container is
+`pointer-events-none` so it never blocks the page beneath it; the toast itself
+is `pointer-events-auto`, so its action and dismiss buttons still work. Inline,
+page-level failures still use `ErrorAlert` (`role="alert"`); toasts are for
+outcomes of actions whose page may already be gone.
 
 ### Bulk email is the same send path, one message at a time
 

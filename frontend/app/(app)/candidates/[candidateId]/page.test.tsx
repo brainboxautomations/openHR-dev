@@ -1010,8 +1010,8 @@ describe("CandidateProfilePage walking a board column", () => {
 
       await moveToShortlist(user);
 
-      const toast = await screen.findByRole("status");
-      expect(toast).toHaveTextContent("Moved Amara Okafor to Shortlist");
+      const toast = screen.getByRole("status");
+      await waitFor(() => expect(toast).toHaveTextContent("Moved Amara Okafor to Shortlist"));
       expect(within(toast).getByRole("button", { name: "Undo" })).toBeInTheDocument();
     });
 
@@ -1077,8 +1077,10 @@ describe("CandidateProfilePage walking a board column", () => {
 
       await user.click(await screen.findByRole("button", { name: "Undo" }));
 
-      expect(await screen.findByRole("status")).toHaveTextContent(
-        "Couldn’t undo, Amara Okafor is still in Shortlist",
+      await waitFor(() =>
+        expect(screen.getByRole("status")).toHaveTextContent(
+          "Couldn’t undo, Amara Okafor is still in Shortlist",
+        ),
       );
       expect(harness.push).not.toHaveBeenCalled();
       await user.click(screen.getByRole("button", { name: "Open" }));
@@ -1094,8 +1096,10 @@ describe("CandidateProfilePage walking a board column", () => {
 
       await moveToShortlist(user);
 
-      expect(await screen.findByRole("status")).toHaveTextContent(
-        "Couldn’t move Amara Okafor, they’re still in Applied",
+      await waitFor(() =>
+        expect(screen.getByRole("status")).toHaveTextContent(
+          "Couldn’t move Amara Okafor, they’re still in Applied",
+        ),
       );
       expect(screen.getByText("Applied · 2 of 3 · 3 left")).toBeInTheDocument();
       expect(stageButton("Applied")).toBeInTheDocument();
@@ -1118,7 +1122,7 @@ describe("CandidateProfilePage walking a board column", () => {
 
       expect(harness.updateCandidate).not.toHaveBeenCalled();
       expect(harness.push).not.toHaveBeenCalled();
-      expect(screen.queryByRole("status")).toBeNull();
+      expect(screen.getByRole("status")).toBeEmptyDOMElement();
     });
 
     it("keeps today's behaviour for a candidate in the queue who is no longer pending", async () => {
@@ -1138,7 +1142,7 @@ describe("CandidateProfilePage walking a board column", () => {
         }),
       );
       expect(harness.push).not.toHaveBeenCalled();
-      expect(screen.queryByRole("status")).toBeNull();
+      expect(screen.getByRole("status")).toBeEmptyDOMElement();
     });
 
     it("keeps today's behaviour when there is no queue", async () => {
@@ -1154,7 +1158,7 @@ describe("CandidateProfilePage walking a board column", () => {
         }),
       );
       expect(harness.push).not.toHaveBeenCalled();
-      expect(screen.queryByRole("status")).toBeNull();
+      expect(screen.getByRole("status")).toBeEmptyDOMElement();
     });
   });
 });

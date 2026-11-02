@@ -83,7 +83,12 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <ToastContext.Provider value={value}>
       {children}
-      <div className="pointer-events-none fixed inset-x-4 bottom-6 z-50 flex justify-center">
+      <div
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        className="pointer-events-none fixed inset-x-4 bottom-6 z-50 flex justify-center"
+      >
         {toast && (
           <Toast
             key={toast.id}
