@@ -22,12 +22,16 @@ import { SendQuestionnaireMenu } from "@/components/organisms/send-questionnaire
 import { questionnaireCompletionState } from "@/utilities/questionnaire-status";
 import {
   boardStageOrder,
+  candidateHref,
   neighbouringCandidates,
   orderedBoardCandidates,
   parseCandidateNavigationContext,
   NO_NEIGHBOURS,
 } from "@/utilities/candidate-navigation";
 import { CandidateNavigator } from "@/components/organisms/candidate-navigator";
+import { useScreeningSession } from "@/providers/screening-session-provider";
+import { screeningProgressLabel } from "@/utilities/screening-queue";
+import { composeHref } from "@/utilities/compose-navigation";
 import { FloatingMenu } from "@/components/molecules/floating-menu";
 import { DocxPreview } from "@/components/molecules/docx-preview";
 import { UpcomingAutomations } from "@/components/organisms/upcoming-automations";
@@ -191,16 +195,20 @@ function ProfileView({
   const stage = stages.find((s) => s.id === stageId) ?? null;
   const notes = notesQuery.data ?? [];
 
+  const screeningSession = useScreeningSession();
+
   const navigationContext = useMemo(() => {
     const parsed = parseCandidateNavigationContext(new URLSearchParams(searchParams.toString()));
     if (!parsed || parsed.positionId !== application.positionId) return null;
-    return parsed;
+    return { positionId: parsed.positionId, filters: parsed.filters };
   }, [searchParams, application.positionId]);
 
   const boardCandidates = useCandidates(navigationContext?.positionId ?? null);
 
-  const neighbours = useMemo(() => {
-    if (!navigationContext) return NO_NEIGHBOURS;
+  const hasScreeningSession = screeningSession !== null;
+
+  const boardNeighbours = useMemo(() => {
+    if (!navigationContext || hasScreeningSession) return NO_NEIGHBOURS;
 
     const ordered = orderedBoardCandidates(
       boardCandidates.data ?? [],
@@ -213,7 +221,17 @@ function ProfileView({
       ordered.map((candidate) => candidate.id),
       applicationId,
     );
-  }, [navigationContext, boardCandidates.data, stages, applicationId]);
+  }, [navigationContext, hasScreeningSession, boardCandidates.data, stages, applicationId]);
+
+  const navigatorContext = screeningSession?.context ?? navigationContext;
+  const neighbours = screeningSession?.neighbours ?? boardNeighbours;
+  const progressLabel = screeningSession
+    ? screeningProgressLabel(screeningSession.stageName, screeningSession.progress)
+    : undefined;
+  const composeForCandidate = composeHref(
+    applicationId,
+    navigatorContext ? candidateHref(applicationId, navigatorContext) : null,
+  );
 
   const onFailure = (title: string, fallback: string) => (error: unknown) =>
     setFailure({ title, message: apiErrorMessage(error, fallback) });
@@ -231,9 +249,17 @@ function ProfileView({
     );
   };
 
+  const currentIsPendingInQueue =
+    screeningSession?.rows.some((row) => row.current && row.pending) ?? false;
+
   const changeStage = (id: string) => {
     setStageMenuOpen(false);
+    if (id === stageId) return;
     setFailure(null);
+    if (screeningSession && currentIsPendingInQueue) {
+      screeningSession.moveAndAdvance(id);
+      return;
+    }
     updateCandidate.mutate(
       { id: applicationId, patch: { stageId: id } },
       {
@@ -302,7 +328,12 @@ function ProfileView({
           >
             Board
           </Button>
-          <CandidateNavigator context={navigationContext} neighbours={neighbours} />
+          <CandidateNavigator
+            context={navigatorContext}
+            neighbours={neighbours}
+            progressLabel={progressLabel}
+            shortcuts={screeningSession !== null}
+          />
 
           <div className="relative">
             <button
@@ -371,6 +402,14 @@ function ProfileView({
           </button>
         </div>
 
+        {screeningSession?.allDone && (
+          <ScreeningAllDone
+            stageName={screeningSession.stageName}
+            backToBoard={() => navigate.push(`/positions/${boardPositionId}/board`)}
+            navigating={navigate.isNavigating}
+          />
+        )}
+
         <div className="flex items-center gap-3.5 px-5 pb-4.5 pt-1">
           <Avatar name={name} size={52} />
           <div className="min-w-0 flex-1">
@@ -432,7 +471,7 @@ function ProfileView({
             leadingIcon={<MailIcon size={14} />}
             className="h-8.5 rounded-lg"
             loading={composeNavigate.isNavigating}
-            onClick={() => composeNavigate.push(`/compose?applicationId=${applicationId}`)}
+            onClick={() => composeNavigate.push(composeForCandidate)}
           >
             Email
           </Button>
@@ -741,11 +780,38 @@ function ProfileView({
               <ProfileEmailThread
                 personId={person.id}
                 personFirstName={person.firstName}
-                applicationId={applicationId}
+                composeHref={composeForCandidate}
               />
             )}
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function ScreeningAllDone({
+  stageName,
+  backToBoard,
+  navigating,
+}: {
+  stageName: string;
+  backToBoard: () => void;
+  navigating: boolean;
+}) {
+  return (
+    <div className="px-3.5 pb-1.5">
+      <div className="flex items-center gap-2.5 rounded-lg border border-accent-5 bg-accent-2 px-3.5 py-2.5">
+        <CheckIcon size={15} className="shrink-0 text-accent-9" />
+        <div className="min-w-0 flex-1">
+          <div className="text-[13px] font-semibold text-accent-12">All done in {stageName}</div>
+          <div className="text-xs text-slate-600">
+            Nobody from this column is left in {stageName}.
+          </div>
+        </div>
+        <Button variant="secondary" size="sm" loading={navigating} onClick={backToBoard}>
+          Back to board
+        </Button>
       </div>
     </div>
   );

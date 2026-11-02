@@ -1,6 +1,6 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { MAX_BULK_SELECTION } from "@/schemas/bulk-candidate-schema";
 import type {
@@ -13,6 +13,10 @@ import type {
   Position,
 } from "@/types/api";
 import type { CandidateExportResponse } from "@/services/candidates-service";
+import {
+  forgetScreeningQueuesInMemory,
+  readScreeningQueue,
+} from "@/utilities/screening-queue-storage";
 
 type MutateOptions<TData> = {
   onSuccess?: (value: TData) => void;
@@ -223,6 +227,8 @@ beforeEach(() => {
   harness.messageTemplates = [];
   harness.questionnaires = [];
   harness.searchParams = new URLSearchParams();
+  sessionStorage.clear();
+  forgetScreeningQueuesInMemory();
 });
 
 describe("PipelineBoardScreen loading, empty and error states", () => {
@@ -313,6 +319,101 @@ describe("PipelineBoardScreen columns", () => {
     renderBoard([makeCandidate({ id: "gone", firstName: "Gone", stageId: "stage-3" })]);
 
     expect(screen.getByText("Gone Okafor")).toBeInTheDocument();
+  });
+});
+
+describe("PipelineBoardScreen opening a card", () => {
+  const COLUMN_KEY = "openhr:screening-queue:position=position-1&queue=stage-1";
+
+  const stayOnPage = (event: MouseEvent) => event.preventDefault();
+
+  beforeEach(() => document.addEventListener("click", stayOnPage));
+  afterEach(() => document.removeEventListener("click", stayOnPage));
+
+  function screeningBoard() {
+    return [
+      makeCandidate({ id: "applied-1", firstName: "First" }),
+      makeCandidate({ id: "shortlist-1", firstName: "Elsewhere", stageId: "stage-2" }),
+      makeCandidate({ id: "applied-2", firstName: "Second" }),
+      makeCandidate({ id: "applied-3", firstName: "Third" }),
+    ];
+  }
+
+  function cardLink(name: string) {
+    return screen.getByText(name).closest("a")!;
+  }
+
+  it("links each card to its profile with the column it sits in", () => {
+    renderBoard(screeningBoard());
+
+    expect(cardLink("Second Okafor")).toHaveAttribute(
+      "href",
+      "/candidates/applied-2?position=position-1&queue=stage-1",
+    );
+    expect(cardLink("Elsewhere Okafor")).toHaveAttribute(
+      "href",
+      "/candidates/shortlist-1?position=position-1&queue=stage-2",
+    );
+  });
+
+  it("snapshots the clicked card's column, in board order, before navigating", async () => {
+    const user = userEvent.setup();
+    renderBoard(screeningBoard());
+
+    expect(readScreeningQueue(COLUMN_KEY)).toBeNull();
+    await user.click(screen.getByText("Second Okafor"));
+
+    expect(readScreeningQueue(COLUMN_KEY)).toMatchObject({
+      positionId: "position-1",
+      stageId: "stage-1",
+      includeArchived: false,
+      applicationIds: ["applied-1", "applied-2", "applied-3"],
+    });
+  });
+
+  it("snapshots only the column, and only what the filters left in it", async () => {
+    const user = userEvent.setup();
+    renderBoard([
+      makeCandidate({ id: "starred-1", firstName: "Starred", starred: true }),
+      makeCandidate({ id: "plain-1", firstName: "Plain" }),
+      makeCandidate({ id: "starred-2", firstName: "Elsewhere", stageId: "stage-2", starred: true }),
+    ]);
+
+    await user.click(screen.getByRole("button", { name: "Starred only" }));
+    await user.click(screen.getByText("Starred Okafor"));
+
+    expect(
+      readScreeningQueue("openhr:screening-queue:position=position-1&starred=1&queue=stage-1")
+        ?.applicationIds,
+    ).toEqual(["starred-1"]);
+  });
+
+  it("does not treat starring a card as opening it", async () => {
+    const user = userEvent.setup();
+    renderBoard([makeCandidate({ id: "applied-1", firstName: "Fresh", seen: false })]);
+
+    await user.click(within(cardLink("Fresh Okafor")).getByRole("button", { name: "Star" }));
+
+    expect(harness.updateMutate).toHaveBeenCalledTimes(1);
+    expect(harness.updateMutate).toHaveBeenCalledWith({
+      id: "applied-1",
+      patch: { starred: true },
+    });
+    expect(readScreeningQueue(COLUMN_KEY)).toBeNull();
+    expect(sessionStorage.getItem(COLUMN_KEY)).toBeNull();
+  });
+
+  it("marks an unseen card seen and snapshots its column when its body is clicked", async () => {
+    const user = userEvent.setup();
+    renderBoard([makeCandidate({ id: "applied-1", firstName: "Fresh", seen: false })]);
+
+    await user.click(screen.getByText("Fresh Okafor"));
+
+    expect(harness.updateMutate).toHaveBeenCalledWith({
+      id: "applied-1",
+      patch: { seen: true },
+    });
+    expect(readScreeningQueue(COLUMN_KEY)?.applicationIds).toEqual(["applied-1"]);
   });
 });
 

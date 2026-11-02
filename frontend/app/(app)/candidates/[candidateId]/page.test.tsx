@@ -1,8 +1,16 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { forgetCollapsedPreferencesInMemory } from "@/hooks/use-collapsed-preference";
+import { ToastProvider } from "@/providers/toast-provider";
+import { orderedBoardCandidates } from "@/utilities/candidate-navigation";
+import {
+  forgetScreeningQueuesInMemory,
+  readScreeningQueue,
+  writeScreeningQueue,
+} from "@/utilities/screening-queue-storage";
 import type {
   Candidate,
   CandidateProfile,
@@ -23,12 +31,14 @@ const harness = vi.hoisted(() => ({
   setRemindersStopped: vi.fn(),
   resendQuestionnaire: vi.fn(),
   push: vi.fn(),
+  searchParams: new URLSearchParams(),
+  candidateId: "application-1",
 }));
 
 vi.mock("next/navigation", () => ({
-  useParams: () => ({ candidateId: "application-1" }),
+  useParams: () => ({ candidateId: harness.candidateId }),
   useRouter: () => ({ push: harness.push }),
-  useSearchParams: () => new URLSearchParams(),
+  useSearchParams: () => harness.searchParams,
 }));
 
 vi.mock("@/services/candidates-service", () => ({
@@ -40,6 +50,11 @@ vi.mock("@/services/candidates-service", () => ({
     listByPosition: harness.listByPosition,
   },
 }));
+
+vi.mock("@/utilities/candidate-navigation", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/utilities/candidate-navigation")>();
+  return { ...actual, orderedBoardCandidates: vi.fn(actual.orderedBoardCandidates) };
+});
 
 vi.mock("@/services/people-service", () => ({
   PeopleService: { update: harness.updatePerson },
@@ -57,6 +72,7 @@ vi.mock("@/services/questionnaires-service", () => ({
 }));
 
 const CandidateProfilePage = (await import("./page")).default;
+const CandidatesLayout = (await import("../layout")).default;
 
 const STAGES: PipelineStage[] = [
   { id: "stage-1", name: "Applied", sortOrder: 1 },
@@ -181,6 +197,12 @@ beforeEach(() => {
   harness.setRemindersStopped.mockReset();
   harness.resendQuestionnaire.mockReset();
   harness.push.mockReset();
+  harness.searchParams = new URLSearchParams();
+  harness.candidateId = "application-1";
+  sessionStorage.clear();
+  localStorage.clear();
+  forgetScreeningQueuesInMemory();
+  forgetCollapsedPreferencesInMemory();
 });
 
 describe("CandidateProfilePage stage change", () => {
@@ -228,6 +250,20 @@ describe("CandidateProfilePage stage change", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Couldn’t move this candidate");
     expect(screen.getByRole("alert")).toHaveTextContent("Database is down");
+  });
+});
+
+describe("CandidateProfilePage moving to the stage they are already in", () => {
+  it("closes the menu and sends nothing", async () => {
+    const user = userEvent.setup();
+    await renderProfile();
+
+    await user.click(stageButton("Applied"));
+    const [, currentStageOption] = screen.getAllByRole("button", { name: "Applied" });
+    await user.click(currentStageOption!);
+
+    expect(harness.updateCandidate).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Shortlist" })).toBeNull();
   });
 });
 
@@ -540,5 +576,623 @@ describe("CandidateProfilePage Email button", () => {
     await user.click(screen.getByRole("button", { name: "Email" }));
 
     expect(harness.push).toHaveBeenCalledWith("/compose?applicationId=application-1");
+  });
+
+  it("tells the composer to come back to the board context it was opened from", async () => {
+    const user = userEvent.setup();
+    harness.searchParams = new URLSearchParams("position=position-1&starred=1");
+    await renderProfile();
+
+    await user.click(screen.getByRole("button", { name: "Email" }));
+
+    const href = harness.push.mock.calls.at(-1)?.[0] as string;
+    const params = new URL(href, "http://localhost").searchParams;
+    expect(params.get("applicationId")).toBe("application-1");
+    expect(params.get("returnTo")).toBe("/candidates/application-1?position=position-1&starred=1");
+  });
+});
+
+describe("CandidateProfilePage walking a board column", () => {
+  const QUEUE_SEARCH = "position=position-1&stages=stage-1&queue=stage-1";
+  const QUEUE_KEY = `openhr:screening-queue:${QUEUE_SEARCH}`;
+
+  let board: Candidate[];
+
+  function boardCandidate(id: string, overrides: Partial<Candidate> = {}): Candidate {
+    return {
+      ...updatedCandidate(),
+      id,
+      firstName: id,
+      stageId: "stage-1",
+      starred: false,
+      ...overrides,
+    };
+  }
+
+  function snapshot(applicationIds: string[]) {
+    writeScreeningQueue(QUEUE_KEY, {
+      version: 1,
+      positionId: "position-1",
+      stageId: "stage-1",
+      includeArchived: false,
+      applicationIds,
+      createdAt: new Date().toISOString(),
+    });
+  }
+
+  async function renderInLayout() {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+
+    const tree = () => (
+      <QueryClientProvider client={client}>
+        <ToastProvider>
+          <CandidatesLayout>
+            <CandidateProfilePage />
+          </CandidatesLayout>
+        </ToastProvider>
+      </QueryClientProvider>
+    );
+    const view = render(tree());
+
+    await screen.findAllByText("Amara Okafor");
+    return {
+      openCandidate: (applicationId: string) => {
+        harness.candidateId = applicationId;
+        view.rerender(tree());
+      },
+    };
+  }
+
+  function arrow(label: "Previous candidate" | "Next candidate") {
+    return screen.getByRole("link", { name: label });
+  }
+
+  function profileHref(applicationId: string) {
+    return `/candidates/${applicationId}?${QUEUE_SEARCH}`;
+  }
+
+  beforeEach(() => {
+    harness.searchParams = new URLSearchParams(QUEUE_SEARCH);
+    board = [
+      boardCandidate("application-0"),
+      boardCandidate("application-1"),
+      boardCandidate("application-2"),
+    ];
+    harness.listByPosition.mockImplementation(async () => board);
+    harness.updateCandidate.mockImplementation(async () => {
+      board = board.map((c) => (c.id === "application-1" ? { ...c, stageId: "stage-2" } : c));
+      harness.profile = profileInStage("stage-2");
+      return updatedCandidate();
+    });
+  });
+
+  it("walks the snapshot taken on the board, in its order rather than the live order", async () => {
+    snapshot(["application-2", "application-1", "application-0"]);
+    await renderInLayout();
+
+    expect(await screen.findByText("Applied · 2 of 3 · 3 left")).toBeInTheDocument();
+    expect(arrow("Previous candidate")).toHaveAttribute("href", profileHref("application-2"));
+    expect(arrow("Next candidate")).toHaveAttribute("href", profileHref("application-0"));
+  });
+
+  it("opens the composer with a way back to this candidate in the same column", async () => {
+    const user = userEvent.setup();
+    snapshot(["application-0", "application-1", "application-2"]);
+    await renderInLayout();
+    await screen.findByText("Applied · 2 of 3 · 3 left");
+
+    await user.click(screen.getByRole("button", { name: "Email" }));
+
+    const href = harness.push.mock.calls.at(-1)?.[0] as string;
+    expect(new URL(href, "http://localhost").searchParams.get("returnTo")).toBe(
+      profileHref("application-1"),
+    );
+  });
+
+  it("does not order the whole board while walking a snapshot", async () => {
+    const user = userEvent.setup();
+    snapshot(["application-0", "application-1", "application-2"]);
+    await renderInLayout();
+    await screen.findByText("Applied · 2 of 3 · 3 left");
+    vi.mocked(orderedBoardCandidates).mockClear();
+
+    await moveToShortlist(user);
+    await waitFor(() => expect(harness.listByPosition).toHaveBeenCalledTimes(2));
+    await screen.findByText("Applied · 2 of 3 · 2 left");
+
+    expect(orderedBoardCandidates).not.toHaveBeenCalled();
+  });
+
+  it("keeps both arrows after the candidate is moved out of the filtered column", async () => {
+    const user = userEvent.setup();
+    snapshot(["application-0", "application-1", "application-2"]);
+    await renderInLayout();
+    await screen.findByText("Applied · 2 of 3 · 3 left");
+
+    await moveToShortlist(user);
+
+    expect(await screen.findByText("Applied · 2 of 3 · 2 left")).toBeInTheDocument();
+    await waitFor(() => expect(harness.listByPosition).toHaveBeenCalledTimes(2));
+    expect(screen.getByText("Applied · 2 of 3 · 2 left")).toBeInTheDocument();
+    expect(arrow("Previous candidate")).toHaveAttribute("href", profileHref("application-0"));
+    expect(arrow("Next candidate")).toHaveAttribute("href", profileHref("application-2"));
+  });
+
+  it("rebuilds the snapshot from the live board when there is none, and saves it", async () => {
+    await renderInLayout();
+
+    expect(await screen.findByText("Applied · 2 of 3 · 3 left")).toBeInTheDocument();
+    expect(arrow("Next candidate")).toHaveAttribute("href", profileHref("application-2"));
+    forgetScreeningQueuesInMemory();
+    expect(readScreeningQueue(QUEUE_KEY)?.applicationIds).toEqual([
+      "application-0",
+      "application-1",
+      "application-2",
+    ]);
+  });
+
+  it("keeps the current candidate when a rebuild under Unseen only would leave them out", async () => {
+    const search = "position=position-1&unseen=1&queue=stage-1";
+    harness.searchParams = new URLSearchParams(search);
+    board = [
+      boardCandidate("application-0", { seen: false }),
+      boardCandidate("application-1", { seen: true }),
+      boardCandidate("application-2", { seen: false }),
+    ];
+    await renderInLayout();
+
+    expect(await screen.findByText("Applied · 2 of 3 · 3 left")).toBeInTheDocument();
+    expect(arrow("Previous candidate")).toHaveAttribute(
+      "href",
+      `/candidates/application-0?${search}`,
+    );
+    expect(arrow("Next candidate")).toHaveAttribute("href", `/candidates/application-2?${search}`);
+    expect(screen.getByRole("navigation", { name: "Screening list" })).toBeInTheDocument();
+    forgetScreeningQueuesInMemory();
+    expect(readScreeningQueue(`openhr:screening-queue:${search}`)?.applicationIds).toEqual([
+      "application-0",
+      "application-1",
+      "application-2",
+    ]);
+  });
+
+  it("rebuilds a snapshot older than twelve hours", async () => {
+    writeScreeningQueue(QUEUE_KEY, {
+      version: 1,
+      positionId: "position-1",
+      stageId: "stage-1",
+      includeArchived: false,
+      applicationIds: ["application-1", "application-9"],
+      createdAt: new Date(Date.now() - 13 * 60 * 60 * 1000).toISOString(),
+    });
+    await renderInLayout();
+
+    expect(await screen.findByText("Applied · 2 of 3 · 3 left")).toBeInTheDocument();
+  });
+
+  it("falls back to the live board, without the queue, when this candidate is not in the snapshot", async () => {
+    snapshot(["application-0", "application-2"]);
+    await renderInLayout();
+
+    await waitFor(() =>
+      expect(arrow("Next candidate")).toHaveAttribute(
+        "href",
+        "/candidates/application-2?position=position-1&stages=stage-1",
+      ),
+    );
+    expect(screen.queryByText(/ left$/)).toBeNull();
+  });
+
+  it("falls back to the live board when the queued stage is not in this pipeline", async () => {
+    harness.searchParams = new URLSearchParams("position=position-1&queue=stage-gone");
+    await renderInLayout();
+
+    await waitFor(() =>
+      expect(arrow("Next candidate")).toHaveAttribute(
+        "href",
+        "/candidates/application-2?position=position-1",
+      ),
+    );
+    expect(screen.queryByText(/ left$/)).toBeNull();
+  });
+
+  describe("screening list", () => {
+    function screeningList() {
+      return screen.queryByRole("navigation", { name: "Screening list" });
+    }
+
+    it("lists the column beside the profile while walking a queue", async () => {
+      snapshot(["application-0", "application-1", "application-2"]);
+      await renderInLayout();
+
+      const list = await screen.findByRole("navigation", { name: "Screening list" });
+      expect(within(list).getByText("3 left")).toBeInTheDocument();
+      expect(within(list).getAllByRole("link")).toHaveLength(3);
+      expect(within(list).getByRole("link", { current: "page" })).toHaveAttribute(
+        "href",
+        profileHref("application-1"),
+      );
+      expect(within(list).getByRole("link", { name: /application-2/ })).toHaveAttribute(
+        "href",
+        profileHref("application-2"),
+      );
+    });
+
+    it("greys out the candidate once they are moved, and keeps them in the list", async () => {
+      const user = userEvent.setup();
+      snapshot(["application-0", "application-1", "application-2"]);
+      await renderInLayout();
+      await screen.findByText("Applied · 2 of 3 · 3 left");
+
+      await moveToShortlist(user);
+
+      const list = await screen.findByRole("navigation", { name: "Screening list" });
+      expect(await within(list).findByText("→ Shortlist")).toBeInTheDocument();
+      expect(within(list).getByText("2 left")).toBeInTheDocument();
+      expect(within(list).getAllByRole("link")).toHaveLength(3);
+    });
+
+    it("stays on screen while the next candidate loads", async () => {
+      snapshot(["application-0", "application-1", "application-2"]);
+      const { openCandidate } = await renderInLayout();
+      await screen.findByRole("navigation", { name: "Screening list" });
+      harness.getProfile.mockImplementation(() => new Promise(() => {}));
+
+      openCandidate("application-2");
+
+      expect(await screen.findByText("Loading candidate…")).toBeInTheDocument();
+      const list = screen.getByRole("navigation", { name: "Screening list" });
+      expect(within(list).getByRole("link", { current: "page" })).toHaveAttribute(
+        "href",
+        profileHref("application-2"),
+      );
+    });
+
+    it("is not shown without a queue", async () => {
+      harness.searchParams = new URLSearchParams("position=position-1&stages=stage-1");
+      await renderInLayout();
+
+      await waitFor(() => expect(arrow("Next candidate")).toBeInTheDocument());
+      expect(screeningList()).toBeNull();
+    });
+
+    it("is not shown when this candidate is not in the snapshot", async () => {
+      snapshot(["application-0", "application-2"]);
+      await renderInLayout();
+
+      await waitFor(() =>
+        expect(arrow("Next candidate")).toHaveAttribute(
+          "href",
+          "/candidates/application-2?position=position-1&stages=stage-1",
+        ),
+      );
+      expect(screeningList()).toBeNull();
+    });
+  });
+
+  describe("keyboard shortcuts", () => {
+    it("opens the next and previous candidates in the column with J and K", async () => {
+      const user = userEvent.setup();
+      snapshot(["application-0", "application-1", "application-2"]);
+      const { openCandidate } = await renderInLayout();
+      await screen.findByText("Applied · 2 of 3 · 3 left");
+
+      await user.keyboard("j");
+      expect(harness.push).toHaveBeenLastCalledWith(profileHref("application-2"));
+
+      openCandidate("application-2");
+      await screen.findByText("Applied · 3 of 3 · 3 left");
+      await user.keyboard("{ArrowLeft}");
+      expect(harness.push).toHaveBeenLastCalledWith(profileHref("application-1"));
+      expect(harness.push).toHaveBeenCalledTimes(2);
+    });
+
+    it("opens the next candidate once when J is pressed again before it loads", async () => {
+      const user = userEvent.setup();
+      snapshot(["application-0", "application-1", "application-2"]);
+      await renderInLayout();
+      await screen.findByText("Applied · 2 of 3 · 3 left");
+
+      await user.keyboard("jj");
+
+      expect(harness.push).toHaveBeenCalledTimes(1);
+      expect(harness.push).toHaveBeenCalledWith(profileHref("application-2"));
+    });
+
+    it("hints at the keys on the arrows", async () => {
+      snapshot(["application-0", "application-1", "application-2"]);
+      await renderInLayout();
+      await screen.findByText("Applied · 2 of 3 · 3 left");
+
+      expect(arrow("Previous candidate")).toHaveAttribute("title", "Previous (K)");
+      expect(arrow("Next candidate")).toHaveAttribute("title", "Next (J)");
+    });
+
+    it("does nothing while typing a note", async () => {
+      const user = userEvent.setup();
+      snapshot(["application-0", "application-1", "application-2"]);
+      await renderInLayout();
+      await screen.findByText("Applied · 2 of 3 · 3 left");
+
+      await user.type(screen.getByPlaceholderText("Write a note for the team…"), "jk");
+
+      expect(harness.push).not.toHaveBeenCalled();
+      expect(screen.getByPlaceholderText("Write a note for the team…")).toHaveValue("jk");
+    });
+
+    it("does nothing while the stage menu is open", async () => {
+      const user = userEvent.setup();
+      snapshot(["application-0", "application-1", "application-2"]);
+      await renderInLayout();
+      await screen.findByText("Applied · 2 of 3 · 3 left");
+
+      await user.click(stageButton("Applied"));
+      await user.keyboard("j{ArrowRight}");
+
+      expect(harness.push).not.toHaveBeenCalled();
+      expect(screen.getByRole("button", { name: "Shortlist" })).toBeInTheDocument();
+    });
+
+    it("is off without a queue", async () => {
+      const user = userEvent.setup();
+      harness.searchParams = new URLSearchParams("position=position-1&stages=stage-1");
+      await renderInLayout();
+      await waitFor(() =>
+        expect(arrow("Next candidate")).toHaveAttribute(
+          "href",
+          "/candidates/application-2?position=position-1&stages=stage-1",
+        ),
+      );
+
+      await user.keyboard("jk{ArrowRight}{ArrowLeft}");
+
+      expect(harness.push).not.toHaveBeenCalled();
+      expect(arrow("Next candidate")).not.toHaveAttribute("title");
+    });
+  });
+
+  it("falls back when the queue belongs to another position", async () => {
+    harness.searchParams = new URLSearchParams("position=position-2&queue=stage-1");
+    await renderInLayout();
+
+    expect(screen.queryByRole("link", { name: "Next candidate" })).toBeNull();
+    expect(screen.queryByText(/ left$/)).toBeNull();
+  });
+  describe("moving a pending candidate", () => {
+    function moveOnTheServer() {
+      harness.updateCandidate.mockImplementation(async (id: string, patch: { stageId: string }) => {
+        board = board.map((c) => (c.id === id ? { ...c, stageId: patch.stageId } : c));
+        if (id === "application-1") harness.profile = profileInStage(patch.stageId);
+        return { ...updatedCandidate(), id, stageId: patch.stageId };
+      });
+    }
+
+    beforeEach(() => {
+      board = board.map((c) =>
+        c.id === "application-1" ? { ...c, firstName: "Amara", lastName: "Okafor" } : c,
+      );
+      moveOnTheServer();
+    });
+
+    it("goes straight to the next pending candidate in the column", async () => {
+      const user = userEvent.setup();
+      snapshot(["application-0", "application-1", "application-2"]);
+      await renderInLayout();
+      await screen.findByText("Applied · 2 of 3 · 3 left");
+
+      await moveToShortlist(user);
+
+      expect(harness.updateCandidate).toHaveBeenCalledWith("application-1", {
+        stageId: "stage-2",
+      });
+      expect(harness.push).toHaveBeenCalledTimes(1);
+      expect(harness.push).toHaveBeenCalledWith(profileHref("application-2"));
+    });
+
+    it("skips candidates who have already been handled", async () => {
+      const user = userEvent.setup();
+      board = [
+        ...board.map((c) => (c.id === "application-2" ? { ...c, stageId: "stage-2" } : c)),
+        boardCandidate("application-3", { archived: true }),
+        boardCandidate("application-4"),
+      ];
+      snapshot(["application-1", "application-2", "application-3", "application-4"]);
+      await renderInLayout();
+      await screen.findByText("Applied · 1 of 4 · 2 left");
+
+      await moveToShortlist(user);
+
+      expect(harness.push).toHaveBeenCalledWith(profileHref("application-4"));
+    });
+
+    it("wraps to the first pending candidate before this one when none is left after it", async () => {
+      const user = userEvent.setup();
+      board = board.map((c) => (c.id === "application-2" ? { ...c, stageId: "stage-2" } : c));
+      snapshot(["application-0", "application-1", "application-2"]);
+      await renderInLayout();
+      await screen.findByText("Applied · 2 of 3 · 2 left");
+
+      await moveToShortlist(user);
+
+      expect(harness.push).toHaveBeenCalledWith(profileHref("application-0"));
+    });
+
+    it("stays put and says the column is done when nobody is left", async () => {
+      const user = userEvent.setup();
+      board = board.map((c) => (c.id === "application-1" ? c : { ...c, stageId: "stage-2" }));
+      snapshot(["application-0", "application-1", "application-2"]);
+      await renderInLayout();
+      await screen.findByText("Applied · 2 of 3 · 1 left");
+      expect(screen.queryByText("All done in Applied")).toBeNull();
+
+      await moveToShortlist(user);
+
+      expect(await screen.findByText("All done in Applied")).toBeInTheDocument();
+      expect(harness.push).not.toHaveBeenCalled();
+
+      await user.click(screen.getByRole("button", { name: "Back to board" }));
+      expect(harness.push).toHaveBeenCalledWith("/positions/position-1/board");
+    });
+
+    it("says who was moved where, with an Undo", async () => {
+      const user = userEvent.setup();
+      snapshot(["application-0", "application-1", "application-2"]);
+      await renderInLayout();
+      await screen.findByText("Applied · 2 of 3 · 3 left");
+
+      await moveToShortlist(user);
+
+      const toast = screen.getByRole("status");
+      await waitFor(() => expect(toast).toHaveTextContent("Moved Amara Okafor to Shortlist"));
+      expect(within(toast).getByRole("button", { name: "Undo" })).toBeInTheDocument();
+    });
+
+    it("puts the candidate back in their stage and returns to them on Undo", async () => {
+      const user = userEvent.setup();
+      snapshot(["application-0", "application-1", "application-2"]);
+      await renderInLayout();
+      await screen.findByText("Applied · 2 of 3 · 3 left");
+      await moveToShortlist(user);
+      harness.push.mockClear();
+
+      await user.click(await screen.findByRole("button", { name: "Undo" }));
+
+      await waitFor(() =>
+        expect(harness.updateCandidate).toHaveBeenLastCalledWith("application-1", {
+          stageId: "stage-1",
+        }),
+      );
+      await waitFor(() => expect(harness.push).toHaveBeenCalledWith(profileHref("application-1")));
+      expect(harness.updateCandidate).toHaveBeenCalledTimes(2);
+      expect(await screen.findByText("Applied · 2 of 3 · 3 left")).toBeInTheDocument();
+    });
+
+    it("waits for the move to land before undoing it", async () => {
+      const user = userEvent.setup();
+      let finishMove: () => void = () => {};
+      harness.updateCandidate.mockImplementationOnce(
+        (id: string, patch: { stageId: string }) =>
+          new Promise((resolve) => {
+            finishMove = () => {
+              board = board.map((c) => (c.id === id ? { ...c, stageId: patch.stageId } : c));
+              resolve({ ...updatedCandidate(), id, stageId: patch.stageId });
+            };
+          }),
+      );
+      snapshot(["application-0", "application-1", "application-2"]);
+      await renderInLayout();
+      await screen.findByText("Applied · 2 of 3 · 3 left");
+      await moveToShortlist(user);
+
+      await user.click(await screen.findByRole("button", { name: "Undo" }));
+      expect(harness.updateCandidate).toHaveBeenCalledTimes(1);
+
+      finishMove();
+
+      await waitFor(() => expect(harness.updateCandidate).toHaveBeenCalledTimes(2));
+      expect(harness.updateCandidate).toHaveBeenLastCalledWith("application-1", {
+        stageId: "stage-1",
+      });
+    });
+
+    it("says the undo failed and offers to open the candidate", async () => {
+      const user = userEvent.setup();
+      snapshot(["application-0", "application-1", "application-2"]);
+      await renderInLayout();
+      await screen.findByText("Applied · 2 of 3 · 3 left");
+      await moveToShortlist(user);
+      await waitFor(() =>
+        expect(screen.getByText("Applied · 2 of 3 · 2 left")).toBeInTheDocument(),
+      );
+      harness.updateCandidate.mockRejectedValueOnce(SERVER_REFUSED);
+      harness.push.mockClear();
+
+      await user.click(await screen.findByRole("button", { name: "Undo" }));
+
+      await waitFor(() =>
+        expect(screen.getByRole("status")).toHaveTextContent(
+          "Couldn’t undo, Amara Okafor is still in Shortlist",
+        ),
+      );
+      expect(harness.push).not.toHaveBeenCalled();
+      await user.click(screen.getByRole("button", { name: "Open" }));
+      expect(harness.push).toHaveBeenCalledWith(profileHref("application-1"));
+    });
+
+    it("rolls back and says so when the move fails, with a way back to them", async () => {
+      const user = userEvent.setup();
+      harness.updateCandidate.mockRejectedValue(SERVER_REFUSED);
+      snapshot(["application-0", "application-1", "application-2"]);
+      await renderInLayout();
+      await screen.findByText("Applied · 2 of 3 · 3 left");
+
+      await moveToShortlist(user);
+
+      await waitFor(() =>
+        expect(screen.getByRole("status")).toHaveTextContent(
+          "Couldn’t move Amara Okafor, they’re still in Applied",
+        ),
+      );
+      expect(screen.getByText("Applied · 2 of 3 · 3 left")).toBeInTheDocument();
+      expect(stageButton("Applied")).toBeInTheDocument();
+      expect(harness.push).toHaveBeenCalledWith(profileHref("application-2"));
+
+      harness.push.mockClear();
+      await user.click(screen.getByRole("button", { name: "Open" }));
+      expect(harness.push).toHaveBeenCalledWith(profileHref("application-1"));
+    });
+
+    it("sends nothing and stays when the stage is the one they are already in", async () => {
+      const user = userEvent.setup();
+      snapshot(["application-0", "application-1", "application-2"]);
+      await renderInLayout();
+      await screen.findByText("Applied · 2 of 3 · 3 left");
+
+      await user.click(stageButton("Applied"));
+      const [, currentStageOption] = screen.getAllByRole("button", { name: "Applied" });
+      await user.click(currentStageOption!);
+
+      expect(harness.updateCandidate).not.toHaveBeenCalled();
+      expect(harness.push).not.toHaveBeenCalled();
+      expect(screen.getByRole("status")).toBeEmptyDOMElement();
+    });
+
+    it("keeps today's behaviour for a candidate in the queue who is no longer pending", async () => {
+      const user = userEvent.setup();
+      board = board.map((c) => (c.id === "application-1" ? { ...c, stageId: "stage-2" } : c));
+      harness.profile = profileInStage("stage-2");
+      snapshot(["application-0", "application-1", "application-2"]);
+      await renderInLayout();
+      await screen.findByText("Applied · 2 of 3 · 2 left");
+
+      await user.click(stageButton("Shortlist"));
+      await user.click(screen.getByRole("button", { name: "Applied" }));
+
+      await waitFor(() =>
+        expect(harness.updateCandidate).toHaveBeenCalledWith("application-1", {
+          stageId: "stage-1",
+        }),
+      );
+      expect(harness.push).not.toHaveBeenCalled();
+      expect(screen.getByRole("status")).toBeEmptyDOMElement();
+    });
+
+    it("keeps today's behaviour when there is no queue", async () => {
+      const user = userEvent.setup();
+      harness.searchParams = new URLSearchParams("position=position-1&stages=stage-1");
+      await renderInLayout();
+
+      await moveToShortlist(user);
+
+      await waitFor(() =>
+        expect(harness.updateCandidate).toHaveBeenCalledWith("application-1", {
+          stageId: "stage-2",
+        }),
+      );
+      expect(harness.push).not.toHaveBeenCalled();
+      expect(screen.getByRole("status")).toBeEmptyDOMElement();
+    });
   });
 });

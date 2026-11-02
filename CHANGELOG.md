@@ -10,11 +10,36 @@ environment variables and one-off steps are listed here. See
 
 ## [Unreleased]
 
+### Added
+
+- **Column screening**: open a card from a board column and the profile walks
+  that column as it was when you clicked, in the board's order and with its
+  filters. Prev/next keeps working after you move a candidate to another stage,
+  and a count next to the arrows shows where you are
+  (`Applied · 3 of 7 · 5 left`).
+  - **Auto-advance**: moving a candidate out of the column opens the next one
+    still waiting in it, and a toast offers Undo. When nobody is left, the
+    profile says "All done" with a way back to the board. A move that fails is
+    rolled back and reported with a link back to the candidate.
+  - **Screening list**: a panel beside the profile lists the column, showing
+    who is still waiting, who has been moved and where, and who is on screen;
+    click a name to jump to them. Collapse it to a strip and it stays collapsed
+    next time. On medium screens it opens over the profile; on small screens
+    only the count is shown.
+  - **Keyboard shortcuts**: J or → for the next candidate, K or ← for the
+    previous one. They are ignored while you type, while a menu or dialog is
+    open, and with a modifier key held.
+  - Choosing the stage a candidate is already in no longer sends an update.
+
 ### Changed
 
 - Renamed the project from BrainBox ATS to openHR.
 - Relicensed from the PolyForm Shield License 1.0.0 to the MIT License. See
   [LICENSE](LICENSE).
+
+### Fixed
+
+- Starring a card on the board no longer marks the candidate as seen.
 
 ## [1.0.0] - 2026-10-15
 

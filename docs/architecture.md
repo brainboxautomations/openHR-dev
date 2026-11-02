@@ -1039,6 +1039,10 @@ navigation rather than a guess:
    archived them, or moved them out of a stage filter — so `neighbouringCandidates`
    returns `{previousId: null, nextId: null}` and both arrows are disabled.
 
+A card opened from a board column walks a frozen snapshot of that column
+instead; see "Screening walks a frozen column snapshot, not the live board". The
+live walk described here is what every other profile link still gets.
+
 There is deliberately **no wrap-around**, which the previous cache-reading
 implementation had. The first candidate has no previous and the last has no next.
 Wrapping makes "next" mean "back to the beginning" without saying so, and the
@@ -1047,6 +1051,244 @@ disabled arrow is the truthful signal that the view has an end.
 The neighbour arithmetic is `neighbouringCandidates(orderedIds, currentId)`, a
 pure function over an array, so every edge — not present, single element, empty —
 is a unit test rather than something to provoke through a rendered board.
+
+### Screening walks a frozen column snapshot, not the live board
+
+Recruiters screen a column: open the first card in Applied, decide, move them,
+go to the next. The live prev/next above could not support that. Moving A1 from
+Applied to Rejected moved A1 to another column of the recomputed walk, so "next"
+pointed into Rejected; with the board filtered to Applied, A1 left the set and
+both arrows went dead. Every decision meant a trip back to the board.
+
+So a card opened from a board column carries `queue=<stageId>` alongside the
+board's other context (`queueStageId` on `CandidateNavigationContext`), and the
+column's ordered application ids are **snapshotted at the click**. The profile's
+arrows walk that snapshot. Stage changes never reorder or shrink it, and the
+arrows still never wrap.
+
+**Where the snapshot lives.** Not in the URL, for the same reason the board's
+ordered ids are not. `utilities/screening-queue-storage.ts` keeps it in an
+in-memory `Map` in front of sessionStorage, under
+`openhr:screening-queue:` + `candidateNavigationSearch(context)`. The key is the
+whole query string, `queue` included, so two columns, or one column under two
+filter sets, never share a snapshot. sessionStorage, not localStorage: a
+screening pass belongs to the tab that started it. Every storage access is
+try/catch-wrapped, and a refused write still leaves the snapshot in memory for
+this page. Reads hand back the same object every time, which is what
+`useSyncExternalStore` needs to avoid re-render loops.
+
+Every column and filter combination opened writes its own key, so a long
+session would otherwise pile them up until the tab's storage quota refused new
+ones. Each write prunes the others: of the snapshots under the prefix, in
+sessionStorage or only in memory (after a refused write), the most recent
+`MAX_STORED_SCREENING_QUEUES` (10) by `createdAt` stay, counting the one just
+written, which is always kept. Entries that no longer parse sort as oldest and
+go first. A pruned key leaves memory and sessionStorage together, so the two
+never disagree, and listing or removing keys is try/catch-wrapped like every
+other access.
+
+**Written synchronously on click, before navigation.** The board's card click
+handler builds the snapshot with `createScreeningQueue`, from the same
+`orderedBoardCandidates` + `columnCandidates` pair the board renders its columns
+from, so the snapshot is exactly the column that was on screen, filters and
+in-column order included. Opening a card from the board again always takes a new
+snapshot.
+
+**Rebuilt when it is missing or stale.** A new tab, a pasted link, a blocked
+store or a snapshot older than 12 hours has nothing usable. `useScreeningQueue`
+then rebuilds it from the live `["candidates", positionId]` query and the
+filters in the URL, in an effect that only writes storage; the write notifies
+the store, and the next render picks it up. A 12-hour-old pass is not worth
+resuming, and its list of who was "in Applied" is no longer what the recruiter
+remembers.
+
+A rebuild always keeps the candidate on screen (`alwaysInclude` on
+`createScreeningQueue`) when they are in the queued column, even if they no
+longer match the filters, at their board-order place in the column. The URL's
+filters are the board's, and opening a card changes what the card matches:
+under "Unseen only" the card was marked seen on the way in, and under "Starred
+only" it may have been unstarred since. Without this, a Cmd-clicked card or a
+pasted link rebuilt a list without the current candidate, the session fell back
+and the panel and count disappeared. Someone who has left the column is still
+not added, so a link to a moved candidate falls back as before.
+
+**Pending.** A snapshot row is _pending_ when the candidate is still in the
+queued stage and, unless archived candidates were on show when the snapshot was
+taken, not archived. Archiving counts as handled. Rows are read live
+(`screeningQueueRows`): a moved candidate stays listed but is no longer pending,
+a deleted one is dropped, and someone who applied after the snapshot is not
+added. The count next to the arrows (`Applied · 3 of 7 · 5 left`) is
+`screeningProgressLabel` over those rows; "left" includes the current candidate
+while they are still pending.
+
+**When there is no queue, nothing changes.** No `queue` parameter, a `position`
+that is not this application's, a queued stage that is not in this pipeline, or
+a current candidate who is not in the snapshot: the profile falls back to the
+live whole-board walk described above, and its arrows drop `queue` from their
+links so the fallback does not half-resume a session on the next profile. Links
+from the Inbox and from "Other applications" carry no queue and behave as before.
+
+**Emailing mid-session keeps the session.** The composer is its own page, so
+leaving it used to land on the bare `/candidates/<id>` and drop the board
+context and the queue. The profile's Email button and the email tab's "Send
+email" links pass `returnTo`: the current profile link built with
+`candidateHref` from the active context (the screening context when there is a
+session, otherwise the board context; none when the profile was opened without
+one). `utilities/compose-navigation.ts` validates it before compose uses it on
+close and after a send: it must be a relative path, not `//host` or `/\host`,
+with no control characters or whitespace, and once parsed against a placeholder
+origin its origin must be unchanged and its pathname must be exactly
+`/candidates/<the same applicationId>`. Anything else (another candidate,
+another page, an absolute or `javascript:` URL) falls back to the plain
+`/candidates/<id>`, so the parameter cannot become an open redirect. Other ways
+into compose (the Inbox, its candidate picker) pass no `returnTo` and behave as
+before.
+
+**The session lives in a layout, not the page.** `ProfileView` is keyed by
+`applicationId` and the page shows a full loader while each profile loads, so
+the page remounts on every step. `app/(app)/candidates/layout.tsx` persists
+across `[candidateId]` and mounts `ScreeningSessionProvider`, which reads the
+route's params and search params, the already-cached profile (for its stages and
+position), and `useScreeningQueue`. `useScreeningSession()` returns
+`{ queue, rows, progress, neighbours, context, stageName, allDone, moveAndAdvance }`,
+or `null` in every fallback case, and the page uses it when it is there (and
+then skips ordering the whole board for the live walk it would discard). The
+provider is wrapped in `Suspense` because a layout that calls `useSearchParams`
+needs one to build.
+
+The remount is also why the move itself lives in the provider. TanStack Query's
+per-call `mutate(vars, { onError })` callbacks do not run once the component
+that called `mutate` has unmounted, and auto-advance unmounts the page straight
+after the click. So `moveAndAdvance` uses the provider's own
+`useUpdateCandidate(...).mutateAsync` and chains on the promise, which settles
+whoever is still on screen; the hook's optimistic `onMutate` and rollback
+`onError` are mutation-level and run regardless.
+
+**Auto-advance.** Choosing a new stage for a candidate who is _pending_ in a
+valid queue calls `moveAndAdvance(toStageId)`; anyone else (a candidate already
+handled, a profile without a queue) takes the old in-place path with its inline
+error. In order:
+
+1. The move is sent; `useUpdateCandidate` patches the caches at once, so the
+   rows no longer count this candidate as pending.
+2. `nextPendingCandidate` picks the first pending row after the current one,
+   wrapping to the first pending row before it. This is the one place the walk
+   wraps: the arrows describe a fixed list and stop at its ends, but "next
+   decision" means whoever is still waiting, wherever they sit. The page
+   `router.push`es there, keeping the queue in the link (`candidateHref`), so
+   Back returns to the candidate just moved. If nobody is pending, it stays, and
+   the page shows "All done in <Stage>" with Back to board (`allDone` is
+   `progress.left === 0`, read live, so an undo or a failed move clears it).
+3. A toast says "Moved <name> to <Stage>" with Undo.
+
+A second move of the same candidate while the first is in flight is ignored;
+moving the next candidate straight away is not, since that is the point.
+
+**Undo ordering.** Undo first waits for the original move to settle. Sending
+the reverse PATCH while the forward one is still in flight would let the two
+race at the server, and whichever landed last would win. If the original move
+failed there is nothing to undo, and its failure toast has already replaced the
+Undo one. Otherwise Undo PATCHes the candidate back to the queue's stage, then
+navigates back to them; if that PATCH fails, an error toast says they are still
+in the new stage and offers Open.
+
+**When the move fails** the hook's `onError` has already restored the caches,
+so the candidate is pending again and the count goes back up. The page has
+usually moved on by then, so the failure is a toast rather than an inline alert:
+"Couldn’t move <name>, they’re still in <Stage>", with Open to go back to them.
+
+Choosing the stage a candidate is already in is a no-op: the menu closes and
+nothing is sent.
+
+**The queue panel.** `CandidateScreeningLayout`, inside the provider, puts
+`ScreeningQueuePanel` to the left of the profile whenever the session is
+non-null, so the panel exists exactly when the arrows walk a snapshot. It lists
+every snapshot row in order (avatar, name, star), with the stage name and
+"N left" in its header. The current row is `aria-current="page"` and scrolled
+into view; handled rows stay, greyed, with "→ <Stage>" or "→ Archived"; deleted
+candidates are gone because `screeningQueueRows` drops them. Each row is a link
+built with `candidateHref`, so it keeps the queue. The panel and the profile
+scroll independently: the layout is `flex h-full min-h-0`, the panel's list is
+its own `overflow-y-auto`, and the profile keeps the height it had before.
+
+The layout always renders its wrapper and only toggles the panel. Wrapping the
+page only once a session appeared would change the tree above the page and
+remount it, losing open menus and drafts. For the same reason the provider reads
+the profile with `keepPreviousWhileLoading` (TanStack `placeholderData`): while
+the next candidate's profile loads, the session keeps the previous one's
+position and stages, which a snapshot shares by construction, so the panel stays
+put and highlights the new row instead of vanishing for the load.
+
+**Breakpoints and the collapse preference.** From `lg` up the panel is docked,
+w-64, and a "«" control collapses it to a w-10 strip. That choice is a
+preference, in localStorage under `openhr:screening-panel-collapsed`, read
+through `useCollapsedPreference` (`useSyncExternalStore`, open on the server and
+whenever storage throws, with an in-memory copy so collapsing still works for
+the visit when storage is blocked). localStorage rather than sessionStorage: how
+much room the profile gets is a habit, not part of one screening pass. Between
+`md` and `lg` there is not room for both, so the panel is always the strip, and
+expanding it lays the list over the profile instead of pushing it; that overlay
+is not saved and closes on a row click, Escape or a click outside. Below `md`
+the panel is hidden and the count next to the arrows is the only progress shown.
+All of this is one DOM switched by Tailwind breakpoint classes, not a
+`matchMedia` hook, so server and client render the same markup; the docked
+expand control and the overlay's open control are separate buttons, each shown
+only at its own breakpoint.
+
+**Keyboard shortcuts.** While a session is active, J or ArrowRight opens the
+next candidate in the snapshot and K or ArrowLeft the previous one, the same
+targets as the arrows (which say so in their `title`), and nothing happens at
+either end. `useQueueShortcuts` is mounted once, in `CandidateScreeningLayout`,
+so it survives the page remounting on every step, and it navigates with the
+same `useNavigate().push` as auto-advance, keeping the queue in the link. A key
+is left alone when any modifier is held (so browser and OS shortcuts such as
+Cmd+ArrowLeft still work), when another handler already called
+`preventDefault`, when it is a key repeat (holding J would otherwise fire a
+navigation per repeat), during IME composition, and when focus is somewhere the
+key means something else: an input, textarea, select, contentEditable,
+`[role=textbox]`, a combobox, slider, tab list, radio group or media player. It
+is also left alone while anything layered over the page is open, detected in
+the DOM rather than by threading state through every component: `[role=dialog]`,
+`[role=alertdialog]`, `[aria-modal=true]`, `[role=menu]`, `[role=listbox]`, or
+a `FloatingMenu`, which carries `data-floating-menu` because the stage menu and
+the other popovers built on it have no ARIA role of their own. Without that
+check, pressing J with the stage menu open would leave the menu's candidate
+behind mid-decision.
+
+Once a shortcut has navigated, further presses are swallowed until the
+neighbours or the context change, that is, until the next candidate is the
+current one. Until the route changes the arrows still point at the same
+candidate, so pressing J twice quickly used to push the same link twice. The
+guard is a ref reset by an effect on a key built from the neighbours and the
+context's query string, not on the listener's effect, which also re-runs when
+`useNavigate` re-renders mid-transition; arriving on a candidate by any other
+route (an arrow, the panel, Back) clears it the same way.
+
+### Toasts: one at a time, mounted in the app shell
+
+`ToastProvider` (`providers/toast-provider.tsx`) is mounted in
+`app/(app)/layout.tsx`, above every page, so a toast raised on one candidate
+survives the navigation to the next. `useToast().show({ message, tone, action })`
+replaces whatever toast is on screen rather than stacking: the newest outcome is
+the one that matters, and a column of stale "Moved …" toasts would bury the Undo
+that still applies. A toast dismisses itself after six seconds; the countdown
+pauses while the pointer is over it or focus is inside it, and resumes with the
+time that was left, so reaching for Undo never races the timer. Running the
+action dismisses the toast, which also makes a double-clicked Undo run once.
+
+The live region is the provider's container, not the toast:
+`role="status"`, `aria-live="polite"` and `aria-atomic="true"` sit on the
+wrapper that is always mounted, and `components/molecules/toast.tsx` carries no
+live-region attributes of its own. Screen readers announce changes inside a
+live region they already know about; a region that is inserted together with
+its text is often not announced at all, so the first toast, and every one after
+a dismissal, would usually have been skipped. Keeping one region also avoids
+nested live regions. The toast is keyed per toast, so a replacement swaps the
+region's content and is announced in full. The container is
+`pointer-events-none` so it never blocks the page beneath it; the toast itself
+is `pointer-events-auto`, so its action and dismiss buttons still work. Inline,
+page-level failures still use `ErrorAlert` (`role="alert"`); toasts are for
+outcomes of actions whose page may already be gone.
 
 ### Bulk email is the same send path, one message at a time
 
@@ -1161,7 +1403,8 @@ withdrawn. A manual per-column collapse was considered and deferred — it is a 
 preference to store, not a property of a stage, and no requirement asks for it.
 
 Board order is therefore just `sort_order`, which is also what the profile's prev/next
-walks, so the two cannot disagree.
+walks, so the two cannot disagree. A single column is `columnCandidates` over that
+walk, which is both what the board renders and what a screening snapshot records.
 
 Stage dots lost their colour coding in the same change. Colour that encoded
 `active` / `success` / `terminal` / `neutral` communicates nothing once those

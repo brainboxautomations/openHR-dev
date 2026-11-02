@@ -171,11 +171,17 @@ export function useExportCandidates() {
   });
 }
 
-export function useCandidateProfile(applicationId: string | null) {
+export function useCandidateProfile(
+  applicationId: string | null,
+  options: { keepPreviousWhileLoading?: boolean } = {},
+) {
   return useQuery({
     queryKey: profileKey(applicationId),
     queryFn: () => CandidatesService.getProfile(applicationId as string),
     enabled: Boolean(applicationId),
+    placeholderData: options.keepPreviousWhileLoading
+      ? (previous: CandidateProfile | undefined) => previous
+      : undefined,
   });
 }
 

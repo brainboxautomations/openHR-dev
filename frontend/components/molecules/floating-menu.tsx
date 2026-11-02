@@ -106,6 +106,7 @@ export function FloatingMenu({
       />
       <div
         ref={menuRef}
+        data-floating-menu=""
         style={
           {
             position: "fixed",

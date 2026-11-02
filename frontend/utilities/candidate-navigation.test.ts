@@ -6,6 +6,7 @@ import {
   boardStageOrder,
   candidateHref,
   candidateNavigationSearch,
+  columnCandidates,
   neighbouringCandidates,
   orderedBoardCandidates,
   parseCandidateNavigationContext,
@@ -140,6 +141,41 @@ describe("orderedBoardCandidates", () => {
   });
 });
 
+describe("columnCandidates", () => {
+  it("keeps only the candidates in the named column, in the order it was given", () => {
+    const visible = [
+      candidate({ id: "c-applied-newest", stageId: "stage-1" }),
+      candidate({ id: "c-shortlist", stageId: "stage-2" }),
+      candidate({ id: "c-applied-oldest", stageId: "stage-1" }),
+    ];
+
+    expect(columnCandidates(visible, "stage-1").map((c) => c.id)).toEqual([
+      "c-applied-newest",
+      "c-applied-oldest",
+    ]);
+  });
+
+  it("is empty for a column nobody is in", () => {
+    expect(columnCandidates([candidate({ stageId: "stage-1" })], "stage-4")).toEqual([]);
+  });
+
+  it("never picks up a candidate with no stage", () => {
+    expect(columnCandidates([candidate({ stageId: null })], "stage-1")).toEqual([]);
+  });
+
+  it("matches the slice of the board walk that belongs to that column", () => {
+    const cards = [
+      candidate({ id: "c-1", stageId: "stage-2" }),
+      candidate({ id: "c-2", stageId: "stage-1" }),
+      candidate({ id: "c-3", stageId: "stage-2", starred: true }),
+      candidate({ id: "c-4", stageId: "stage-1", archived: true }),
+    ];
+    const visible = orderedBoardCandidates(cards, boardStageOrder(STAGES), filters(), NOW);
+
+    expect(columnCandidates(visible, "stage-2").map((c) => c.id)).toEqual(["c-1", "c-3"]);
+  });
+});
+
 describe("candidate navigation context round-trips through the query string", () => {
   it("carries only the position when no filter is set", () => {
     const search = candidateNavigationSearch({ positionId: "position-1", filters: filters() });
@@ -183,6 +219,36 @@ describe("candidate navigation context round-trips through the query string", ()
     );
 
     expect(parsed?.filters.addedWithin).toBe("any");
+  });
+
+  it("carries the column a card was opened from as the queue", () => {
+    const search = candidateNavigationSearch({
+      positionId: "position-1",
+      filters: filters({ starredOnly: true }),
+      queueStageId: "stage-2",
+    });
+
+    expect(search).toBe("position=position-1&starred=1&queue=stage-2");
+    expect(parseCandidateNavigationContext(new URLSearchParams(search))?.queueStageId).toBe(
+      "stage-2",
+    );
+  });
+
+  it("reads no queue when the link was not opened from a column", () => {
+    const parsed = parseCandidateNavigationContext(new URLSearchParams("position=position-1"));
+
+    expect(parsed).not.toHaveProperty("queueStageId");
+  });
+
+  it("serialises the same context to the same string after a round trip", () => {
+    const search = candidateNavigationSearch({
+      positionId: "position-1",
+      filters: filters({ search: "  amara ", stageIds: new Set(["stage-2", "stage-1"]) }),
+      queueStageId: "stage-1",
+    });
+    const reparsed = parseCandidateNavigationContext(new URLSearchParams(search));
+
+    expect(candidateNavigationSearch(reparsed!)).toBe(search);
   });
 
   it("builds a profile link that carries the board's context", () => {

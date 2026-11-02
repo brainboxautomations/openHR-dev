@@ -38,9 +38,12 @@ import {
 } from "@/utilities/candidate-filters";
 import {
   boardStageOrder,
+  columnCandidates,
   orderedBoardCandidates,
   type CandidateNavigationContext,
 } from "@/utilities/candidate-navigation";
+import { createScreeningQueue, screeningQueueKey } from "@/utilities/screening-queue";
+import { writeScreeningQueue } from "@/utilities/screening-queue-storage";
 import { MAX_BULK_SELECTION } from "@/schemas/bulk-candidate-schema";
 import { candidateExportCsv, candidateExportFilename } from "@/utilities/candidate-export";
 import { CheckboxIndicator } from "@/components/atoms/checkbox";
@@ -143,7 +146,7 @@ export function PipelineBoardScreen({ positionId }: { positionId: string }) {
       ? `A bulk action covers at most ${MAX_BULK_SELECTION} candidates at a time. ${selected.size} of the ${visible.length} in this view are selected — narrow the filters and run it again for the rest.`
       : null;
 
-  const byStage = (stageId: string) => visible.filter((c) => c.stageId === stageId);
+  const byStage = (stageId: string) => columnCandidates(visible, stageId);
   const activeCount = boardStages.reduce((n, s) => n + byStage(s.id).length, 0);
 
   const replaceSelection = (ids: Iterable<string>) => setSelectionOverride(new Set(ids));
@@ -176,7 +179,19 @@ export function PipelineBoardScreen({ positionId }: { positionId: string }) {
     updateCandidate.mutate({ id, patch: { starred: !c.starred } });
   };
 
-  const openCandidate = (id: string) => {
+  const openCandidate = (id: string, stageId: string) => {
+    writeScreeningQueue(
+      screeningQueueKey({ ...navigationContext, queueStageId: stageId }),
+      createScreeningQueue({
+        positionId,
+        stageId,
+        candidates,
+        stages: boardStages,
+        filters,
+        now: new Date(),
+      }),
+    );
+
     const c = candidates.find((x) => x.id === id);
     if (c && !c.seen) updateCandidate.mutate({ id, patch: { seen: true } });
   };
@@ -766,7 +781,7 @@ function BoardColumn({
   selected: Set<string>;
   draggingId: string | null;
   dragOverStage: string | null;
-  onOpen: (id: string) => void;
+  onOpen: (id: string, stageId: string) => void;
   onToggleSelect: (id: string) => void;
   onToggleStar: (id: string) => void;
   onCardDragStart: (id: string) => void;
@@ -776,6 +791,10 @@ function BoardColumn({
   onOpenStageActions: (stageId: string) => void;
 }) {
   const isDropTarget = draggingId !== null && dragOverStage === stage.id;
+  const columnContext: CandidateNavigationContext = {
+    ...navigationContext,
+    queueStageId: stage.id,
+  };
   return (
     <div className="flex max-h-full w-67 shrink-0 flex-col">
       <div className="flex shrink-0 items-center gap-2 px-1 pb-2.5 pt-0.5">
@@ -832,15 +851,17 @@ function BoardColumn({
                   e.preventDefault();
                   e.stopPropagation();
                   onToggleSelect(c.id);
-                } else {
-                  onOpen(c.id);
+                  return;
                 }
+                const button = e.target instanceof Element ? e.target.closest("button") : null;
+                if (button && e.currentTarget.contains(button)) return;
+                onOpen(c.id, stage.id);
               }}
               className={cn("transition-opacity", draggingId === c.id && "opacity-40")}
             >
               <CandidateCard
                 candidate={c}
-                navigationContext={navigationContext}
+                navigationContext={columnContext}
                 selectMode={selectMode}
                 selected={selected.has(c.id)}
                 onToggleSelect={() => onToggleSelect(c.id)}
