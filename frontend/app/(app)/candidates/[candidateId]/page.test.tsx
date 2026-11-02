@@ -1,8 +1,9 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { ToastProvider } from "@/providers/toast-provider";
 import {
   forgetScreeningQueuesInMemory,
   readScreeningQueue,
@@ -602,9 +603,11 @@ describe("CandidateProfilePage walking a board column", () => {
 
     render(
       <QueryClientProvider client={client}>
-        <CandidatesLayout>
-          <CandidateProfilePage />
-        </CandidatesLayout>
+        <ToastProvider>
+          <CandidatesLayout>
+            <CandidateProfilePage />
+          </CandidatesLayout>
+        </ToastProvider>
       </QueryClientProvider>,
     );
 
@@ -717,5 +720,236 @@ describe("CandidateProfilePage walking a board column", () => {
 
     expect(screen.queryByRole("link", { name: "Next candidate" })).toBeNull();
     expect(screen.queryByText(/ left$/)).toBeNull();
+  });
+  describe("moving a pending candidate", () => {
+    function moveOnTheServer() {
+      harness.updateCandidate.mockImplementation(async (id: string, patch: { stageId: string }) => {
+        board = board.map((c) => (c.id === id ? { ...c, stageId: patch.stageId } : c));
+        if (id === "application-1") harness.profile = profileInStage(patch.stageId);
+        return { ...updatedCandidate(), id, stageId: patch.stageId };
+      });
+    }
+
+    beforeEach(() => {
+      board = board.map((c) =>
+        c.id === "application-1" ? { ...c, firstName: "Amara", lastName: "Okafor" } : c,
+      );
+      moveOnTheServer();
+    });
+
+    it("goes straight to the next pending candidate in the column", async () => {
+      const user = userEvent.setup();
+      snapshot(["application-0", "application-1", "application-2"]);
+      await renderInLayout();
+      await screen.findByText("Applied · 2 of 3 · 3 left");
+
+      await moveToShortlist(user);
+
+      expect(harness.updateCandidate).toHaveBeenCalledWith("application-1", {
+        stageId: "stage-2",
+      });
+      expect(harness.push).toHaveBeenCalledTimes(1);
+      expect(harness.push).toHaveBeenCalledWith(profileHref("application-2"));
+    });
+
+    it("skips candidates who have already been handled", async () => {
+      const user = userEvent.setup();
+      board = [
+        ...board.map((c) => (c.id === "application-2" ? { ...c, stageId: "stage-2" } : c)),
+        boardCandidate("application-3", { archived: true }),
+        boardCandidate("application-4"),
+      ];
+      snapshot(["application-1", "application-2", "application-3", "application-4"]);
+      await renderInLayout();
+      await screen.findByText("Applied · 1 of 4 · 2 left");
+
+      await moveToShortlist(user);
+
+      expect(harness.push).toHaveBeenCalledWith(profileHref("application-4"));
+    });
+
+    it("wraps to the first pending candidate before this one when none is left after it", async () => {
+      const user = userEvent.setup();
+      board = board.map((c) => (c.id === "application-2" ? { ...c, stageId: "stage-2" } : c));
+      snapshot(["application-0", "application-1", "application-2"]);
+      await renderInLayout();
+      await screen.findByText("Applied · 2 of 3 · 2 left");
+
+      await moveToShortlist(user);
+
+      expect(harness.push).toHaveBeenCalledWith(profileHref("application-0"));
+    });
+
+    it("stays put and says the column is done when nobody is left", async () => {
+      const user = userEvent.setup();
+      board = board.map((c) => (c.id === "application-1" ? c : { ...c, stageId: "stage-2" }));
+      snapshot(["application-0", "application-1", "application-2"]);
+      await renderInLayout();
+      await screen.findByText("Applied · 2 of 3 · 1 left");
+      expect(screen.queryByText("All done in Applied")).toBeNull();
+
+      await moveToShortlist(user);
+
+      expect(await screen.findByText("All done in Applied")).toBeInTheDocument();
+      expect(harness.push).not.toHaveBeenCalled();
+
+      await user.click(screen.getByRole("button", { name: "Back to board" }));
+      expect(harness.push).toHaveBeenCalledWith("/positions/position-1/board");
+    });
+
+    it("says who was moved where, with an Undo", async () => {
+      const user = userEvent.setup();
+      snapshot(["application-0", "application-1", "application-2"]);
+      await renderInLayout();
+      await screen.findByText("Applied · 2 of 3 · 3 left");
+
+      await moveToShortlist(user);
+
+      const toast = await screen.findByRole("status");
+      expect(toast).toHaveTextContent("Moved Amara Okafor to Shortlist");
+      expect(within(toast).getByRole("button", { name: "Undo" })).toBeInTheDocument();
+    });
+
+    it("puts the candidate back in their stage and returns to them on Undo", async () => {
+      const user = userEvent.setup();
+      snapshot(["application-0", "application-1", "application-2"]);
+      await renderInLayout();
+      await screen.findByText("Applied · 2 of 3 · 3 left");
+      await moveToShortlist(user);
+      harness.push.mockClear();
+
+      await user.click(await screen.findByRole("button", { name: "Undo" }));
+
+      await waitFor(() =>
+        expect(harness.updateCandidate).toHaveBeenLastCalledWith("application-1", {
+          stageId: "stage-1",
+        }),
+      );
+      await waitFor(() => expect(harness.push).toHaveBeenCalledWith(profileHref("application-1")));
+      expect(harness.updateCandidate).toHaveBeenCalledTimes(2);
+      expect(await screen.findByText("Applied · 2 of 3 · 3 left")).toBeInTheDocument();
+    });
+
+    it("waits for the move to land before undoing it", async () => {
+      const user = userEvent.setup();
+      let finishMove: () => void = () => {};
+      harness.updateCandidate.mockImplementationOnce(
+        (id: string, patch: { stageId: string }) =>
+          new Promise((resolve) => {
+            finishMove = () => {
+              board = board.map((c) => (c.id === id ? { ...c, stageId: patch.stageId } : c));
+              resolve({ ...updatedCandidate(), id, stageId: patch.stageId });
+            };
+          }),
+      );
+      snapshot(["application-0", "application-1", "application-2"]);
+      await renderInLayout();
+      await screen.findByText("Applied · 2 of 3 · 3 left");
+      await moveToShortlist(user);
+
+      await user.click(await screen.findByRole("button", { name: "Undo" }));
+      expect(harness.updateCandidate).toHaveBeenCalledTimes(1);
+
+      finishMove();
+
+      await waitFor(() => expect(harness.updateCandidate).toHaveBeenCalledTimes(2));
+      expect(harness.updateCandidate).toHaveBeenLastCalledWith("application-1", {
+        stageId: "stage-1",
+      });
+    });
+
+    it("says the undo failed and offers to open the candidate", async () => {
+      const user = userEvent.setup();
+      snapshot(["application-0", "application-1", "application-2"]);
+      await renderInLayout();
+      await screen.findByText("Applied · 2 of 3 · 3 left");
+      await moveToShortlist(user);
+      await waitFor(() =>
+        expect(screen.getByText("Applied · 2 of 3 · 2 left")).toBeInTheDocument(),
+      );
+      harness.updateCandidate.mockRejectedValueOnce(SERVER_REFUSED);
+      harness.push.mockClear();
+
+      await user.click(await screen.findByRole("button", { name: "Undo" }));
+
+      expect(await screen.findByRole("status")).toHaveTextContent(
+        "Couldn’t undo, Amara Okafor is still in Shortlist",
+      );
+      expect(harness.push).not.toHaveBeenCalled();
+      await user.click(screen.getByRole("button", { name: "Open" }));
+      expect(harness.push).toHaveBeenCalledWith(profileHref("application-1"));
+    });
+
+    it("rolls back and says so when the move fails, with a way back to them", async () => {
+      const user = userEvent.setup();
+      harness.updateCandidate.mockRejectedValue(SERVER_REFUSED);
+      snapshot(["application-0", "application-1", "application-2"]);
+      await renderInLayout();
+      await screen.findByText("Applied · 2 of 3 · 3 left");
+
+      await moveToShortlist(user);
+
+      expect(await screen.findByRole("status")).toHaveTextContent(
+        "Couldn’t move Amara Okafor, they’re still in Applied",
+      );
+      expect(screen.getByText("Applied · 2 of 3 · 3 left")).toBeInTheDocument();
+      expect(stageButton("Applied")).toBeInTheDocument();
+      expect(harness.push).toHaveBeenCalledWith(profileHref("application-2"));
+
+      harness.push.mockClear();
+      await user.click(screen.getByRole("button", { name: "Open" }));
+      expect(harness.push).toHaveBeenCalledWith(profileHref("application-1"));
+    });
+
+    it("sends nothing and stays when the stage is the one they are already in", async () => {
+      const user = userEvent.setup();
+      snapshot(["application-0", "application-1", "application-2"]);
+      await renderInLayout();
+      await screen.findByText("Applied · 2 of 3 · 3 left");
+
+      await user.click(stageButton("Applied"));
+      const [, currentStageOption] = screen.getAllByRole("button", { name: "Applied" });
+      await user.click(currentStageOption!);
+
+      expect(harness.updateCandidate).not.toHaveBeenCalled();
+      expect(harness.push).not.toHaveBeenCalled();
+      expect(screen.queryByRole("status")).toBeNull();
+    });
+
+    it("keeps today's behaviour for a candidate in the queue who is no longer pending", async () => {
+      const user = userEvent.setup();
+      board = board.map((c) => (c.id === "application-1" ? { ...c, stageId: "stage-2" } : c));
+      harness.profile = profileInStage("stage-2");
+      snapshot(["application-0", "application-1", "application-2"]);
+      await renderInLayout();
+      await screen.findByText("Applied · 2 of 3 · 2 left");
+
+      await user.click(stageButton("Shortlist"));
+      await user.click(screen.getByRole("button", { name: "Applied" }));
+
+      await waitFor(() =>
+        expect(harness.updateCandidate).toHaveBeenCalledWith("application-1", {
+          stageId: "stage-1",
+        }),
+      );
+      expect(harness.push).not.toHaveBeenCalled();
+      expect(screen.queryByRole("status")).toBeNull();
+    });
+
+    it("keeps today's behaviour when there is no queue", async () => {
+      const user = userEvent.setup();
+      harness.searchParams = new URLSearchParams("position=position-1&stages=stage-1");
+      await renderInLayout();
+
+      await moveToShortlist(user);
+
+      await waitFor(() =>
+        expect(harness.updateCandidate).toHaveBeenCalledWith("application-1", {
+          stageId: "stage-2",
+        }),
+      );
+      expect(harness.push).not.toHaveBeenCalled();
+      expect(screen.queryByRole("status")).toBeNull();
+    });
   });
 });

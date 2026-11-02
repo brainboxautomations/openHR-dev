@@ -1114,9 +1114,51 @@ the page remounts on every step. `app/(app)/candidates/layout.tsx` persists
 across `[candidateId]` and mounts `ScreeningSessionProvider`, which reads the
 route's params and search params, the already-cached profile (for its stages and
 position), and `useScreeningQueue`. `useScreeningSession()` returns
-`{ queue, rows, progress, neighbours, context, stageName }`, or `null` in every
-fallback case, and the page uses it when it is there. The provider is wrapped in
-`Suspense` because a layout that calls `useSearchParams` needs one to build.
+`{ queue, rows, progress, neighbours, context, stageName, allDone, moveAndAdvance }`,
+or `null` in every fallback case, and the page uses it when it is there. The
+provider is wrapped in `Suspense` because a layout that calls `useSearchParams`
+needs one to build.
+
+The remount is also why the move itself lives in the provider. TanStack Query's
+per-call `mutate(vars, { onError })` callbacks do not run once the component
+that called `mutate` has unmounted, and auto-advance unmounts the page straight
+after the click. So `moveAndAdvance` uses the provider's own
+`useUpdateCandidate(...).mutateAsync` and chains on the promise, which settles
+whoever is still on screen; the hook's optimistic `onMutate` and rollback
+`onError` are mutation-level and run regardless.
+
+**Auto-advance.** Choosing a new stage for a candidate who is _pending_ in a
+valid queue calls `moveAndAdvance(toStageId)`; anyone else (a candidate already
+handled, a profile without a queue) takes the old in-place path with its inline
+error. In order:
+
+1. The move is sent; `useUpdateCandidate` patches the caches at once, so the
+   rows no longer count this candidate as pending.
+2. `nextPendingCandidate` picks the first pending row after the current one,
+   wrapping to the first pending row before it. This is the one place the walk
+   wraps: the arrows describe a fixed list and stop at its ends, but "next
+   decision" means whoever is still waiting, wherever they sit. The page
+   `router.push`es there, keeping the queue in the link (`candidateHref`), so
+   Back returns to the candidate just moved. If nobody is pending, it stays, and
+   the page shows "All done in <Stage>" with Back to board (`allDone` is
+   `progress.left === 0`, read live, so an undo or a failed move clears it).
+3. A toast says "Moved <name> to <Stage>" with Undo.
+
+A second move of the same candidate while the first is in flight is ignored;
+moving the next candidate straight away is not, since that is the point.
+
+**Undo ordering.** Undo first waits for the original move to settle. Sending
+the reverse PATCH while the forward one is still in flight would let the two
+race at the server, and whichever landed last would win. If the original move
+failed there is nothing to undo, and its failure toast has already replaced the
+Undo one. Otherwise Undo PATCHes the candidate back to the queue's stage, then
+navigates back to them; if that PATCH fails, an error toast says they are still
+in the new stage and offers Open.
+
+**When the move fails** the hook's `onError` has already restored the caches,
+so the candidate is pending again and the count goes back up. The page has
+usually moved on by then, so the failure is a toast rather than an inline alert:
+"Couldn’t move <name>, they’re still in <Stage>", with Open to go back to them.
 
 Choosing the stage a candidate is already in is a no-op: the menu closes and
 nothing is sent.

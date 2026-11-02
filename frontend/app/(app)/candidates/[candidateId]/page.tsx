@@ -241,10 +241,17 @@ function ProfileView({
     );
   };
 
+  const currentIsPendingInQueue =
+    screeningSession?.rows.some((row) => row.current && row.pending) ?? false;
+
   const changeStage = (id: string) => {
     setStageMenuOpen(false);
     if (id === stageId) return;
     setFailure(null);
+    if (screeningSession && currentIsPendingInQueue) {
+      screeningSession.moveAndAdvance(id);
+      return;
+    }
     updateCandidate.mutate(
       { id: applicationId, patch: { stageId: id } },
       {
@@ -385,6 +392,14 @@ function ProfileView({
             <DotsIcon size={16} />
           </button>
         </div>
+
+        {screeningSession?.allDone && (
+          <ScreeningAllDone
+            stageName={screeningSession.stageName}
+            backToBoard={() => navigate.push(`/positions/${boardPositionId}/board`)}
+            navigating={navigate.isNavigating}
+          />
+        )}
 
         <div className="flex items-center gap-3.5 px-5 pb-4.5 pt-1">
           <Avatar name={name} size={52} />
@@ -761,6 +776,33 @@ function ProfileView({
             )}
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function ScreeningAllDone({
+  stageName,
+  backToBoard,
+  navigating,
+}: {
+  stageName: string;
+  backToBoard: () => void;
+  navigating: boolean;
+}) {
+  return (
+    <div className="px-3.5 pb-1.5">
+      <div className="flex items-center gap-2.5 rounded-lg border border-accent-5 bg-accent-2 px-3.5 py-2.5">
+        <CheckIcon size={15} className="shrink-0 text-accent-9" />
+        <div className="min-w-0 flex-1">
+          <div className="text-[13px] font-semibold text-accent-12">All done in {stageName}</div>
+          <div className="text-xs text-slate-600">
+            Nobody from this column is left in {stageName}.
+          </div>
+        </div>
+        <Button variant="secondary" size="sm" loading={navigating} onClick={backToBoard}>
+          Back to board
+        </Button>
       </div>
     </div>
   );

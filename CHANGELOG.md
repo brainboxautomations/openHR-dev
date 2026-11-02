@@ -16,6 +16,11 @@ environment variables and one-off steps are listed here. See
   that column, so prev/next keeps working after a candidate is moved to another
   stage, with a count next to the arrows (`Applied · 3 of 7 · 5 left`). Choosing
   the stage a candidate is already in no longer sends an update.
+- **Auto-advance while screening**: moving a candidate out of the column you are
+  screening opens the next candidate still waiting in it, and a toast offers
+  Undo. When nobody is left, the profile says "All done" with a way back to the
+  board. A move that fails is rolled back and reported with a link back to the
+  candidate.
 
 ### Changed
 
