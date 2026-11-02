@@ -28,6 +28,8 @@ import {
   NO_NEIGHBOURS,
 } from "@/utilities/candidate-navigation";
 import { CandidateNavigator } from "@/components/organisms/candidate-navigator";
+import { useScreeningSession } from "@/providers/screening-session-provider";
+import { screeningProgressLabel } from "@/utilities/screening-queue";
 import { FloatingMenu } from "@/components/molecules/floating-menu";
 import { DocxPreview } from "@/components/molecules/docx-preview";
 import { UpcomingAutomations } from "@/components/organisms/upcoming-automations";
@@ -191,15 +193,17 @@ function ProfileView({
   const stage = stages.find((s) => s.id === stageId) ?? null;
   const notes = notesQuery.data ?? [];
 
+  const screeningSession = useScreeningSession();
+
   const navigationContext = useMemo(() => {
     const parsed = parseCandidateNavigationContext(new URLSearchParams(searchParams.toString()));
     if (!parsed || parsed.positionId !== application.positionId) return null;
-    return parsed;
+    return { positionId: parsed.positionId, filters: parsed.filters };
   }, [searchParams, application.positionId]);
 
   const boardCandidates = useCandidates(navigationContext?.positionId ?? null);
 
-  const neighbours = useMemo(() => {
+  const boardNeighbours = useMemo(() => {
     if (!navigationContext) return NO_NEIGHBOURS;
 
     const ordered = orderedBoardCandidates(
@@ -214,6 +218,12 @@ function ProfileView({
       applicationId,
     );
   }, [navigationContext, boardCandidates.data, stages, applicationId]);
+
+  const navigatorContext = screeningSession?.context ?? navigationContext;
+  const neighbours = screeningSession?.neighbours ?? boardNeighbours;
+  const progressLabel = screeningSession
+    ? screeningProgressLabel(screeningSession.stageName, screeningSession.progress)
+    : undefined;
 
   const onFailure = (title: string, fallback: string) => (error: unknown) =>
     setFailure({ title, message: apiErrorMessage(error, fallback) });
@@ -233,6 +243,7 @@ function ProfileView({
 
   const changeStage = (id: string) => {
     setStageMenuOpen(false);
+    if (id === stageId) return;
     setFailure(null);
     updateCandidate.mutate(
       { id: applicationId, patch: { stageId: id } },
@@ -302,7 +313,11 @@ function ProfileView({
           >
             Board
           </Button>
-          <CandidateNavigator context={navigationContext} neighbours={neighbours} />
+          <CandidateNavigator
+            context={navigatorContext}
+            neighbours={neighbours}
+            progressLabel={progressLabel}
+          />
 
           <div className="relative">
             <button

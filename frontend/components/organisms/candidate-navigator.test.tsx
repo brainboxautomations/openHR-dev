@@ -69,4 +69,54 @@ describe("CandidateNavigator", () => {
       expect(screen.getByRole("link", { name: label })).toHaveAttribute("aria-disabled", "true");
     }
   });
+
+  it("shows how far through the column the recruiter is, next to the arrows", () => {
+    render(
+      <CandidateNavigator
+        context={{ ...CONTEXT, queueStageId: "stage-1" }}
+        neighbours={{ previousId: "application-1", nextId: "application-3" }}
+        progressLabel="Applied · 3 of 7 · 5 left"
+      />,
+    );
+
+    expect(screen.getByText("Applied · 3 of 7 · 5 left")).toBeInTheDocument();
+  });
+
+  it("keeps the column in the links, so the next profile walks the same snapshot", () => {
+    render(
+      <CandidateNavigator
+        context={{ ...CONTEXT, queueStageId: "stage-1" }}
+        neighbours={{ previousId: null, nextId: "application-3" }}
+        progressLabel="Applied · 1 of 2 · 2 left"
+      />,
+    );
+
+    expect(screen.getByRole("link", { name: "Next candidate" })).toHaveAttribute(
+      "href",
+      "/candidates/application-3?position=position-1&starred=1&queue=stage-1",
+    );
+  });
+
+  it("shows no count when it walks the whole board", () => {
+    render(
+      <CandidateNavigator
+        context={CONTEXT}
+        neighbours={{ previousId: "application-1", nextId: "application-3" }}
+      />,
+    );
+
+    expect(screen.queryByText(/ left$/)).not.toBeInTheDocument();
+  });
+
+  it("shows no count either when there is no board context", () => {
+    render(
+      <CandidateNavigator
+        context={null}
+        neighbours={NO_NEIGHBOURS}
+        progressLabel="Applied · 1 of 2 · 2 left"
+      />,
+    );
+
+    expect(screen.queryByText("Applied · 1 of 2 · 2 left")).not.toBeInTheDocument();
+  });
 });

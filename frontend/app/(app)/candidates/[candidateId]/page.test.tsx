@@ -3,6 +3,11 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import {
+  forgetScreeningQueuesInMemory,
+  readScreeningQueue,
+  writeScreeningQueue,
+} from "@/utilities/screening-queue-storage";
 import type {
   Candidate,
   CandidateProfile,
@@ -23,12 +28,13 @@ const harness = vi.hoisted(() => ({
   setRemindersStopped: vi.fn(),
   resendQuestionnaire: vi.fn(),
   push: vi.fn(),
+  searchParams: new URLSearchParams(),
 }));
 
 vi.mock("next/navigation", () => ({
   useParams: () => ({ candidateId: "application-1" }),
   useRouter: () => ({ push: harness.push }),
-  useSearchParams: () => new URLSearchParams(),
+  useSearchParams: () => harness.searchParams,
 }));
 
 vi.mock("@/services/candidates-service", () => ({
@@ -57,6 +63,7 @@ vi.mock("@/services/questionnaires-service", () => ({
 }));
 
 const CandidateProfilePage = (await import("./page")).default;
+const CandidatesLayout = (await import("../layout")).default;
 
 const STAGES: PipelineStage[] = [
   { id: "stage-1", name: "Applied", sortOrder: 1 },
@@ -181,6 +188,9 @@ beforeEach(() => {
   harness.setRemindersStopped.mockReset();
   harness.resendQuestionnaire.mockReset();
   harness.push.mockReset();
+  harness.searchParams = new URLSearchParams();
+  sessionStorage.clear();
+  forgetScreeningQueuesInMemory();
 });
 
 describe("CandidateProfilePage stage change", () => {
@@ -228,6 +238,20 @@ describe("CandidateProfilePage stage change", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Couldn’t move this candidate");
     expect(screen.getByRole("alert")).toHaveTextContent("Database is down");
+  });
+});
+
+describe("CandidateProfilePage moving to the stage they are already in", () => {
+  it("closes the menu and sends nothing", async () => {
+    const user = userEvent.setup();
+    await renderProfile();
+
+    await user.click(stageButton("Applied"));
+    const [, currentStageOption] = screen.getAllByRole("button", { name: "Applied" });
+    await user.click(currentStageOption!);
+
+    expect(harness.updateCandidate).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Shortlist" })).toBeNull();
   });
 });
 
@@ -540,5 +564,158 @@ describe("CandidateProfilePage Email button", () => {
     await user.click(screen.getByRole("button", { name: "Email" }));
 
     expect(harness.push).toHaveBeenCalledWith("/compose?applicationId=application-1");
+  });
+});
+
+describe("CandidateProfilePage walking a board column", () => {
+  const QUEUE_SEARCH = "position=position-1&stages=stage-1&queue=stage-1";
+  const QUEUE_KEY = `openhr:screening-queue:${QUEUE_SEARCH}`;
+
+  let board: Candidate[];
+
+  function boardCandidate(id: string, overrides: Partial<Candidate> = {}): Candidate {
+    return {
+      ...updatedCandidate(),
+      id,
+      firstName: id,
+      stageId: "stage-1",
+      starred: false,
+      ...overrides,
+    };
+  }
+
+  function snapshot(applicationIds: string[]) {
+    writeScreeningQueue(QUEUE_KEY, {
+      version: 1,
+      positionId: "position-1",
+      stageId: "stage-1",
+      includeArchived: false,
+      applicationIds,
+      createdAt: new Date().toISOString(),
+    });
+  }
+
+  async function renderInLayout() {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+
+    render(
+      <QueryClientProvider client={client}>
+        <CandidatesLayout>
+          <CandidateProfilePage />
+        </CandidatesLayout>
+      </QueryClientProvider>,
+    );
+
+    await screen.findAllByText("Amara Okafor");
+  }
+
+  function arrow(label: "Previous candidate" | "Next candidate") {
+    return screen.getByRole("link", { name: label });
+  }
+
+  function profileHref(applicationId: string) {
+    return `/candidates/${applicationId}?${QUEUE_SEARCH}`;
+  }
+
+  beforeEach(() => {
+    harness.searchParams = new URLSearchParams(QUEUE_SEARCH);
+    board = [
+      boardCandidate("application-0"),
+      boardCandidate("application-1"),
+      boardCandidate("application-2"),
+    ];
+    harness.listByPosition.mockImplementation(async () => board);
+    harness.updateCandidate.mockImplementation(async () => {
+      board = board.map((c) => (c.id === "application-1" ? { ...c, stageId: "stage-2" } : c));
+      harness.profile = profileInStage("stage-2");
+      return updatedCandidate();
+    });
+  });
+
+  it("walks the snapshot taken on the board, in its order rather than the live order", async () => {
+    snapshot(["application-2", "application-1", "application-0"]);
+    await renderInLayout();
+
+    expect(await screen.findByText("Applied · 2 of 3 · 3 left")).toBeInTheDocument();
+    expect(arrow("Previous candidate")).toHaveAttribute("href", profileHref("application-2"));
+    expect(arrow("Next candidate")).toHaveAttribute("href", profileHref("application-0"));
+  });
+
+  it("keeps both arrows after the candidate is moved out of the filtered column", async () => {
+    const user = userEvent.setup();
+    snapshot(["application-0", "application-1", "application-2"]);
+    await renderInLayout();
+    await screen.findByText("Applied · 2 of 3 · 3 left");
+
+    await moveToShortlist(user);
+
+    expect(await screen.findByText("Applied · 2 of 3 · 2 left")).toBeInTheDocument();
+    await waitFor(() => expect(harness.listByPosition).toHaveBeenCalledTimes(2));
+    expect(screen.getByText("Applied · 2 of 3 · 2 left")).toBeInTheDocument();
+    expect(arrow("Previous candidate")).toHaveAttribute("href", profileHref("application-0"));
+    expect(arrow("Next candidate")).toHaveAttribute("href", profileHref("application-2"));
+  });
+
+  it("rebuilds the snapshot from the live board when there is none, and saves it", async () => {
+    await renderInLayout();
+
+    expect(await screen.findByText("Applied · 2 of 3 · 3 left")).toBeInTheDocument();
+    expect(arrow("Next candidate")).toHaveAttribute("href", profileHref("application-2"));
+    forgetScreeningQueuesInMemory();
+    expect(readScreeningQueue(QUEUE_KEY)?.applicationIds).toEqual([
+      "application-0",
+      "application-1",
+      "application-2",
+    ]);
+  });
+
+  it("rebuilds a snapshot older than twelve hours", async () => {
+    writeScreeningQueue(QUEUE_KEY, {
+      version: 1,
+      positionId: "position-1",
+      stageId: "stage-1",
+      includeArchived: false,
+      applicationIds: ["application-1", "application-9"],
+      createdAt: new Date(Date.now() - 13 * 60 * 60 * 1000).toISOString(),
+    });
+    await renderInLayout();
+
+    expect(await screen.findByText("Applied · 2 of 3 · 3 left")).toBeInTheDocument();
+  });
+
+  it("falls back to the live board, without the queue, when this candidate is not in the snapshot", async () => {
+    snapshot(["application-0", "application-2"]);
+    await renderInLayout();
+
+    await waitFor(() =>
+      expect(arrow("Next candidate")).toHaveAttribute(
+        "href",
+        "/candidates/application-2?position=position-1&stages=stage-1",
+      ),
+    );
+    expect(screen.queryByText(/ left$/)).toBeNull();
+  });
+
+  it("falls back to the live board when the queued stage is not in this pipeline", async () => {
+    harness.searchParams = new URLSearchParams("position=position-1&queue=stage-gone");
+    await renderInLayout();
+
+    await waitFor(() =>
+      expect(arrow("Next candidate")).toHaveAttribute(
+        "href",
+        "/candidates/application-2?position=position-1",
+      ),
+    );
+    expect(screen.queryByText(/ left$/)).toBeNull();
+  });
+
+  it("falls back when the queue belongs to another position", async () => {
+    harness.searchParams = new URLSearchParams("position=position-2&queue=stage-1");
+    await renderInLayout();
+
+    expect(screen.queryByRole("link", { name: "Next candidate" })).toBeNull();
+    expect(screen.queryByText(/ left$/)).toBeNull();
   });
 });

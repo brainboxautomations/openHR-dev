@@ -98,7 +98,7 @@ export function parseScreeningQueue(raw: unknown): ScreeningQueue | null {
 
 export function isScreeningQueueFresh(queue: ScreeningQueue, now: Date): boolean {
   const age = now.getTime() - Date.parse(queue.createdAt);
-  return age >= 0 && age < SCREENING_QUEUE_TTL_MS;
+  return age < SCREENING_QUEUE_TTL_MS;
 }
 
 export function isScreeningPending(queue: ScreeningQueue, candidate: Candidate): boolean {

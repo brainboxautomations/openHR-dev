@@ -188,10 +188,10 @@ describe("isScreeningQueueFresh", () => {
     expect(isScreeningQueueFresh(queue(), later)).toBe(false);
   });
 
-  it("is stale when it claims to come from the future", () => {
+  it("is fresh when it was taken just after the clock that reads it", () => {
     const earlier = new Date(NOW.getTime() - 60_000);
 
-    expect(isScreeningQueueFresh(queue(), earlier)).toBe(false);
+    expect(isScreeningQueueFresh(queue(), earlier)).toBe(true);
   });
 });
 

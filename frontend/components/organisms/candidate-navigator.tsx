@@ -12,6 +12,7 @@ import { ChevronDownIcon, ChevronRightIcon } from "@/components/atoms/icons";
 export type CandidateNavigatorProps = {
   context: CandidateNavigationContext | null;
   neighbours: CandidateNeighbours;
+  progressLabel?: string;
 };
 
 const stepClass =
@@ -43,18 +44,29 @@ function Step({
   );
 }
 
-export function CandidateNavigator({ context, neighbours }: CandidateNavigatorProps) {
+export function CandidateNavigator({
+  context,
+  neighbours,
+  progressLabel,
+}: CandidateNavigatorProps) {
   if (!context) return null;
 
   return (
-    <div className="flex items-center overflow-hidden rounded-md border border-slate-200">
-      <Step applicationId={neighbours.previousId} context={context} label="Previous candidate">
-        <ChevronDownIcon size={14} className="rotate-90" />
-      </Step>
-      <span className="h-4 w-px bg-slate-200" />
-      <Step applicationId={neighbours.nextId} context={context} label="Next candidate">
-        <ChevronRightIcon size={14} />
-      </Step>
-    </div>
+    <>
+      <div className="flex items-center overflow-hidden rounded-md border border-slate-200">
+        <Step applicationId={neighbours.previousId} context={context} label="Previous candidate">
+          <ChevronDownIcon size={14} className="rotate-90" />
+        </Step>
+        <span className="h-4 w-px bg-slate-200" />
+        <Step applicationId={neighbours.nextId} context={context} label="Next candidate">
+          <ChevronRightIcon size={14} />
+        </Step>
+      </div>
+      {progressLabel && (
+        <span className="whitespace-nowrap font-mono text-[11px] text-slate-500">
+          {progressLabel}
+        </span>
+      )}
+    </>
   );
 }

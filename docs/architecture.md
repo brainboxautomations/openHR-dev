@@ -1039,6 +1039,10 @@ navigation rather than a guess:
    archived them, or moved them out of a stage filter — so `neighbouringCandidates`
    returns `{previousId: null, nextId: null}` and both arrows are disabled.
 
+A card opened from a board column walks a frozen snapshot of that column
+instead; see "Screening walks a frozen column snapshot, not the live board". The
+live walk described here is what every other profile link still gets.
+
 There is deliberately **no wrap-around**, which the previous cache-reading
 implementation had. The first candidate has no previous and the last has no next.
 Wrapping makes "next" mean "back to the beginning" without saying so, and the
@@ -1047,6 +1051,75 @@ disabled arrow is the truthful signal that the view has an end.
 The neighbour arithmetic is `neighbouringCandidates(orderedIds, currentId)`, a
 pure function over an array, so every edge — not present, single element, empty —
 is a unit test rather than something to provoke through a rendered board.
+
+### Screening walks a frozen column snapshot, not the live board
+
+Recruiters screen a column: open the first card in Applied, decide, move them,
+go to the next. The live prev/next above could not support that. Moving A1 from
+Applied to Rejected moved A1 to another column of the recomputed walk, so "next"
+pointed into Rejected; with the board filtered to Applied, A1 left the set and
+both arrows went dead. Every decision meant a trip back to the board.
+
+So a card opened from a board column carries `queue=<stageId>` alongside the
+board's other context (`queueStageId` on `CandidateNavigationContext`), and the
+column's ordered application ids are **snapshotted at the click**. The profile's
+arrows walk that snapshot. Stage changes never reorder or shrink it, and the
+arrows still never wrap.
+
+**Where the snapshot lives.** Not in the URL, for the same reason the board's
+ordered ids are not. `utilities/screening-queue-storage.ts` keeps it in an
+in-memory `Map` in front of sessionStorage, under
+`openhr:screening-queue:` + `candidateNavigationSearch(context)`. The key is the
+whole query string, `queue` included, so two columns, or one column under two
+filter sets, never share a snapshot. sessionStorage, not localStorage: a
+screening pass belongs to the tab that started it. Every storage access is
+try/catch-wrapped, and a refused write still leaves the snapshot in memory for
+this page. Reads hand back the same object every time, which is what
+`useSyncExternalStore` needs to avoid re-render loops.
+
+**Written synchronously on click, before navigation.** The board's card click
+handler builds the snapshot with `createScreeningQueue`, from the same
+`orderedBoardCandidates` + `columnCandidates` pair the board renders its columns
+from, so the snapshot is exactly the column that was on screen, filters and
+in-column order included. Opening a card from the board again always takes a new
+snapshot.
+
+**Rebuilt when it is missing or stale.** A new tab, a pasted link, a blocked
+store or a snapshot older than 12 hours has nothing usable. `useScreeningQueue`
+then rebuilds it from the live `["candidates", positionId]` query and the
+filters in the URL, in an effect that only writes storage; the write notifies
+the store, and the next render picks it up. A 12-hour-old pass is not worth
+resuming, and its list of who was "in Applied" is no longer what the recruiter
+remembers.
+
+**Pending.** A snapshot row is _pending_ when the candidate is still in the
+queued stage and, unless archived candidates were on show when the snapshot was
+taken, not archived. Archiving counts as handled. Rows are read live
+(`screeningQueueRows`): a moved candidate stays listed but is no longer pending,
+a deleted one is dropped, and someone who applied after the snapshot is not
+added. The count next to the arrows (`Applied · 3 of 7 · 5 left`) is
+`screeningProgressLabel` over those rows; "left" includes the current candidate
+while they are still pending.
+
+**When there is no queue, nothing changes.** No `queue` parameter, a `position`
+that is not this application's, a queued stage that is not in this pipeline, or
+a current candidate who is not in the snapshot: the profile falls back to the
+live whole-board walk described above, and its arrows drop `queue` from their
+links so the fallback does not half-resume a session on the next profile. Links
+from the Inbox and from "Other applications" carry no queue and behave as before.
+
+**The session lives in a layout, not the page.** `ProfileView` is keyed by
+`applicationId` and the page shows a full loader while each profile loads, so
+the page remounts on every step. `app/(app)/candidates/layout.tsx` persists
+across `[candidateId]` and mounts `ScreeningSessionProvider`, which reads the
+route's params and search params, the already-cached profile (for its stages and
+position), and `useScreeningQueue`. `useScreeningSession()` returns
+`{ queue, rows, progress, neighbours, context, stageName }`, or `null` in every
+fallback case, and the page uses it when it is there. The provider is wrapped in
+`Suspense` because a layout that calls `useSearchParams` needs one to build.
+
+Choosing the stage a candidate is already in is a no-op: the menu closes and
+nothing is sent.
 
 ### Bulk email is the same send path, one message at a time
 
@@ -1161,7 +1234,8 @@ withdrawn. A manual per-column collapse was considered and deferred — it is a 
 preference to store, not a property of a stage, and no requirement asks for it.
 
 Board order is therefore just `sort_order`, which is also what the profile's prev/next
-walks, so the two cannot disagree.
+walks, so the two cannot disagree. A single column is `columnCandidates` over that
+walk, which is both what the board renders and what a screening snapshot records.
 
 Stage dots lost their colour coding in the same change. Colour that encoded
 `active` / `success` / `terminal` / `neutral` communicates nothing once those

@@ -10,6 +10,13 @@ environment variables and one-off steps are listed here. See
 
 ## [Unreleased]
 
+### Added
+
+- **Column screening**: a profile opened from a board column walks a snapshot of
+  that column, so prev/next keeps working after a candidate is moved to another
+  stage, with a count next to the arrows (`Applied · 3 of 7 · 5 left`). Choosing
+  the stage a candidate is already in no longer sends an update.
+
 ### Changed
 
 - Renamed the project from BrainBox ATS to openHR.
