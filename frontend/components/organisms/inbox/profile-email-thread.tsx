@@ -50,11 +50,11 @@ function groupByThread(messages: Message[]): ThreadGroup[] {
 export function ProfileEmailThread({
   personId,
   personFirstName,
-  applicationId,
+  composeHref,
 }: {
   personId: string;
   personFirstName: string;
-  applicationId: string;
+  composeHref: string;
 }) {
   const messagesQuery = usePersonMessages(personId);
   const groups = useMemo(() => groupByThread(messagesQuery.data ?? []), [messagesQuery.data]);
@@ -85,7 +85,7 @@ export function ProfileEmailThread({
           land here.
         </div>
         <Link
-          href={`/compose?applicationId=${applicationId}`}
+          href={composeHref}
           className="mt-1.5 inline-flex h-7.5 items-center rounded-[7px] border border-slate-300 bg-white px-2.75 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50"
         >
           Send email
@@ -167,7 +167,7 @@ export function ProfileEmailThread({
 
       <div className="flex shrink-0 justify-end border-t border-slate-100 px-4 pb-3.5 pt-2.5">
         <Link
-          href={`/compose?applicationId=${applicationId}`}
+          href={composeHref}
           className="inline-flex h-7.5 items-center rounded-[7px] border border-slate-300 bg-white px-2.75 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50"
         >
           Send email

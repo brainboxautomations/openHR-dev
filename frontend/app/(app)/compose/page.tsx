@@ -36,6 +36,7 @@ import {
   formatFileSize,
 } from "@/utilities/message-attachments";
 import { applyRichTextMark, type RichTextMark } from "@/utilities/rich-text";
+import { COMPOSE_RETURN_PARAM, composeReturnPath } from "@/utilities/compose-navigation";
 
 function SendIcon() {
   return <Send size={14} aria-hidden="true" />;
@@ -140,7 +141,9 @@ function ComposeScreen() {
       key={applicationId}
       applicationId={applicationId}
       profile={profileQuery.data}
-      onClose={() => navigate.push(`/candidates/${applicationId}`)}
+      onClose={() =>
+        navigate.push(composeReturnPath(params.get(COMPOSE_RETURN_PARAM), applicationId))
+      }
     />
   );
 }

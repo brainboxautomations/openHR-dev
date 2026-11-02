@@ -22,6 +22,7 @@ import { SendQuestionnaireMenu } from "@/components/organisms/send-questionnaire
 import { questionnaireCompletionState } from "@/utilities/questionnaire-status";
 import {
   boardStageOrder,
+  candidateHref,
   neighbouringCandidates,
   orderedBoardCandidates,
   parseCandidateNavigationContext,
@@ -30,6 +31,7 @@ import {
 import { CandidateNavigator } from "@/components/organisms/candidate-navigator";
 import { useScreeningSession } from "@/providers/screening-session-provider";
 import { screeningProgressLabel } from "@/utilities/screening-queue";
+import { composeHref } from "@/utilities/compose-navigation";
 import { FloatingMenu } from "@/components/molecules/floating-menu";
 import { DocxPreview } from "@/components/molecules/docx-preview";
 import { UpcomingAutomations } from "@/components/organisms/upcoming-automations";
@@ -224,6 +226,10 @@ function ProfileView({
   const progressLabel = screeningSession
     ? screeningProgressLabel(screeningSession.stageName, screeningSession.progress)
     : undefined;
+  const composeForCandidate = composeHref(
+    applicationId,
+    navigatorContext ? candidateHref(applicationId, navigatorContext) : null,
+  );
 
   const onFailure = (title: string, fallback: string) => (error: unknown) =>
     setFailure({ title, message: apiErrorMessage(error, fallback) });
@@ -463,7 +469,7 @@ function ProfileView({
             leadingIcon={<MailIcon size={14} />}
             className="h-8.5 rounded-lg"
             loading={composeNavigate.isNavigating}
-            onClick={() => composeNavigate.push(`/compose?applicationId=${applicationId}`)}
+            onClick={() => composeNavigate.push(composeForCandidate)}
           >
             Email
           </Button>
@@ -772,7 +778,7 @@ function ProfileView({
               <ProfileEmailThread
                 personId={person.id}
                 personFirstName={person.firstName}
-                applicationId={applicationId}
+                composeHref={composeForCandidate}
               />
             )}
           </div>

@@ -571,6 +571,19 @@ describe("CandidateProfilePage Email button", () => {
 
     expect(harness.push).toHaveBeenCalledWith("/compose?applicationId=application-1");
   });
+
+  it("tells the composer to come back to the board context it was opened from", async () => {
+    const user = userEvent.setup();
+    harness.searchParams = new URLSearchParams("position=position-1&starred=1");
+    await renderProfile();
+
+    await user.click(screen.getByRole("button", { name: "Email" }));
+
+    const href = harness.push.mock.calls.at(-1)?.[0] as string;
+    const params = new URL(href, "http://localhost").searchParams;
+    expect(params.get("applicationId")).toBe("application-1");
+    expect(params.get("returnTo")).toBe("/candidates/application-1?position=position-1&starred=1");
+  });
 });
 
 describe("CandidateProfilePage walking a board column", () => {
@@ -656,6 +669,20 @@ describe("CandidateProfilePage walking a board column", () => {
     expect(await screen.findByText("Applied · 2 of 3 · 3 left")).toBeInTheDocument();
     expect(arrow("Previous candidate")).toHaveAttribute("href", profileHref("application-2"));
     expect(arrow("Next candidate")).toHaveAttribute("href", profileHref("application-0"));
+  });
+
+  it("opens the composer with a way back to this candidate in the same column", async () => {
+    const user = userEvent.setup();
+    snapshot(["application-0", "application-1", "application-2"]);
+    await renderInLayout();
+    await screen.findByText("Applied · 2 of 3 · 3 left");
+
+    await user.click(screen.getByRole("button", { name: "Email" }));
+
+    const href = harness.push.mock.calls.at(-1)?.[0] as string;
+    expect(new URL(href, "http://localhost").searchParams.get("returnTo")).toBe(
+      profileHref("application-1"),
+    );
   });
 
   it("keeps both arrows after the candidate is moved out of the filtered column", async () => {

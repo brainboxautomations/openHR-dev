@@ -1108,6 +1108,22 @@ live whole-board walk described above, and its arrows drop `queue` from their
 links so the fallback does not half-resume a session on the next profile. Links
 from the Inbox and from "Other applications" carry no queue and behave as before.
 
+**Emailing mid-session keeps the session.** The composer is its own page, so
+leaving it used to land on the bare `/candidates/<id>` and drop the board
+context and the queue. The profile's Email button and the email tab's "Send
+email" links pass `returnTo`: the current profile link built with
+`candidateHref` from the active context (the screening context when there is a
+session, otherwise the board context; none when the profile was opened without
+one). `utilities/compose-navigation.ts` validates it before compose uses it on
+close and after a send: it must be a relative path, not `//host` or `/\host`,
+with no control characters or whitespace, and once parsed against a placeholder
+origin its origin must be unchanged and its pathname must be exactly
+`/candidates/<the same applicationId>`. Anything else (another candidate,
+another page, an absolute or `javascript:` URL) falls back to the plain
+`/candidates/<id>`, so the parameter cannot become an open redirect. Other ways
+into compose (the Inbox, its candidate picker) pass no `returnTo` and behave as
+before.
+
 **The session lives in a layout, not the page.** `ProfileView` is keyed by
 `applicationId` and the page shows a full loader while each profile loads, so
 the page remounts on every step. `app/(app)/candidates/layout.tsx` persists
