@@ -1121,6 +1121,23 @@ fallback case, and the page uses it when it is there. The provider is wrapped in
 Choosing the stage a candidate is already in is a no-op: the menu closes and
 nothing is sent.
 
+### Toasts: one at a time, mounted in the app shell
+
+`ToastProvider` (`providers/toast-provider.tsx`) is mounted in
+`app/(app)/layout.tsx`, above every page, so a toast raised on one candidate
+survives the navigation to the next. `useToast().show({ message, tone, action })`
+replaces whatever toast is on screen rather than stacking: the newest outcome is
+the one that matters, and a column of stale "Moved …" toasts would bury the Undo
+that still applies. A toast dismisses itself after six seconds; the countdown
+pauses while the pointer is over it or focus is inside it, and resumes with the
+time that was left, so reaching for Undo never races the timer. Running the
+action dismisses the toast, which also makes a double-clicked Undo run once.
+
+`components/molecules/toast.tsx` is `role="status"` with `aria-live="polite"`
+and is keyed per toast, so a replacement is announced. Inline, page-level
+failures still use `ErrorAlert` (`role="alert"`); toasts are for outcomes of
+actions whose page may already be gone.
+
 ### Bulk email is the same send path, one message at a time
 
 `POST /api/applications/bulk-email` loops `dispatchMessage` over the selection and
