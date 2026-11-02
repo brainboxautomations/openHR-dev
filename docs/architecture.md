@@ -1163,6 +1163,41 @@ usually moved on by then, so the failure is a toast rather than an inline alert:
 Choosing the stage a candidate is already in is a no-op: the menu closes and
 nothing is sent.
 
+**The queue panel.** `CandidateScreeningLayout`, inside the provider, puts
+`ScreeningQueuePanel` to the left of the profile whenever the session is
+non-null, so the panel exists exactly when the arrows walk a snapshot. It lists
+every snapshot row in order (avatar, name, star), with the stage name and
+"N left" in its header. The current row is `aria-current="page"` and scrolled
+into view; handled rows stay, greyed, with "→ <Stage>" or "→ Archived"; deleted
+candidates are gone because `screeningQueueRows` drops them. Each row is a link
+built with `candidateHref`, so it keeps the queue. The panel and the profile
+scroll independently: the layout is `flex h-full min-h-0`, the panel's list is
+its own `overflow-y-auto`, and the profile keeps the height it had before.
+
+The layout always renders its wrapper and only toggles the panel. Wrapping the
+page only once a session appeared would change the tree above the page and
+remount it, losing open menus and drafts. For the same reason the provider reads
+the profile with `keepPreviousWhileLoading` (TanStack `placeholderData`): while
+the next candidate's profile loads, the session keeps the previous one's
+position and stages, which a snapshot shares by construction, so the panel stays
+put and highlights the new row instead of vanishing for the load.
+
+**Breakpoints and the collapse preference.** From `lg` up the panel is docked,
+w-64, and a "«" control collapses it to a w-10 strip. That choice is a
+preference, in localStorage under `openhr:screening-panel-collapsed`, read
+through `useCollapsedPreference` (`useSyncExternalStore`, open on the server and
+whenever storage throws, with an in-memory copy so collapsing still works for
+the visit when storage is blocked). localStorage rather than sessionStorage: how
+much room the profile gets is a habit, not part of one screening pass. Between
+`md` and `lg` there is not room for both, so the panel is always the strip, and
+expanding it lays the list over the profile instead of pushing it; that overlay
+is not saved and closes on a row click, Escape or a click outside. Below `md`
+the panel is hidden and the count next to the arrows is the only progress shown.
+All of this is one DOM switched by Tailwind breakpoint classes, not a
+`matchMedia` hook, so server and client render the same markup; the docked
+expand control and the overlay's open control are separate buttons, each shown
+only at its own breakpoint.
+
 ### Toasts: one at a time, mounted in the app shell
 
 `ToastProvider` (`providers/toast-provider.tsx`) is mounted in

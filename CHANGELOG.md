@@ -21,6 +21,11 @@ environment variables and one-off steps are listed here. See
   Undo. When nobody is left, the profile says "All done" with a way back to the
   board. A move that fails is rolled back and reported with a link back to the
   candidate.
+- **Screening list**: beside the profile, a list of the column being screened
+  shows who is still waiting, who has been moved and where, and who is on
+  screen; click a name to jump to them. Collapse it to a strip and it stays
+  collapsed next time. On medium screens it opens over the profile; on small
+  screens only the count is shown.
 
 ### Changed
 

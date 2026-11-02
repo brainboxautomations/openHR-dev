@@ -3,6 +3,7 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { forgetCollapsedPreferencesInMemory } from "@/hooks/use-collapsed-preference";
 import { ToastProvider } from "@/providers/toast-provider";
 import {
   forgetScreeningQueuesInMemory,
@@ -30,10 +31,11 @@ const harness = vi.hoisted(() => ({
   resendQuestionnaire: vi.fn(),
   push: vi.fn(),
   searchParams: new URLSearchParams(),
+  candidateId: "application-1",
 }));
 
 vi.mock("next/navigation", () => ({
-  useParams: () => ({ candidateId: "application-1" }),
+  useParams: () => ({ candidateId: harness.candidateId }),
   useRouter: () => ({ push: harness.push }),
   useSearchParams: () => harness.searchParams,
 }));
@@ -190,8 +192,11 @@ beforeEach(() => {
   harness.resendQuestionnaire.mockReset();
   harness.push.mockReset();
   harness.searchParams = new URLSearchParams();
+  harness.candidateId = "application-1";
   sessionStorage.clear();
+  localStorage.clear();
   forgetScreeningQueuesInMemory();
+  forgetCollapsedPreferencesInMemory();
 });
 
 describe("CandidateProfilePage stage change", () => {
@@ -601,17 +606,24 @@ describe("CandidateProfilePage walking a board column", () => {
       defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
     });
 
-    render(
+    const tree = () => (
       <QueryClientProvider client={client}>
         <ToastProvider>
           <CandidatesLayout>
             <CandidateProfilePage />
           </CandidatesLayout>
         </ToastProvider>
-      </QueryClientProvider>,
+      </QueryClientProvider>
     );
+    const view = render(tree());
 
     await screen.findAllByText("Amara Okafor");
+    return {
+      openCandidate: (applicationId: string) => {
+        harness.candidateId = applicationId;
+        view.rerender(tree());
+      },
+    };
   }
 
   function arrow(label: "Previous candidate" | "Next candidate") {
@@ -712,6 +724,80 @@ describe("CandidateProfilePage walking a board column", () => {
       ),
     );
     expect(screen.queryByText(/ left$/)).toBeNull();
+  });
+
+  describe("screening list", () => {
+    function screeningList() {
+      return screen.queryByRole("navigation", { name: "Screening list" });
+    }
+
+    it("lists the column beside the profile while walking a queue", async () => {
+      snapshot(["application-0", "application-1", "application-2"]);
+      await renderInLayout();
+
+      const list = await screen.findByRole("navigation", { name: "Screening list" });
+      expect(within(list).getByText("3 left")).toBeInTheDocument();
+      expect(within(list).getAllByRole("link")).toHaveLength(3);
+      expect(within(list).getByRole("link", { current: "page" })).toHaveAttribute(
+        "href",
+        profileHref("application-1"),
+      );
+      expect(within(list).getByRole("link", { name: /application-2/ })).toHaveAttribute(
+        "href",
+        profileHref("application-2"),
+      );
+    });
+
+    it("greys out the candidate once they are moved, and keeps them in the list", async () => {
+      const user = userEvent.setup();
+      snapshot(["application-0", "application-1", "application-2"]);
+      await renderInLayout();
+      await screen.findByText("Applied · 2 of 3 · 3 left");
+
+      await moveToShortlist(user);
+
+      const list = await screen.findByRole("navigation", { name: "Screening list" });
+      expect(await within(list).findByText("→ Shortlist")).toBeInTheDocument();
+      expect(within(list).getByText("2 left")).toBeInTheDocument();
+      expect(within(list).getAllByRole("link")).toHaveLength(3);
+    });
+
+    it("stays on screen while the next candidate loads", async () => {
+      snapshot(["application-0", "application-1", "application-2"]);
+      const { openCandidate } = await renderInLayout();
+      await screen.findByRole("navigation", { name: "Screening list" });
+      harness.getProfile.mockImplementation(() => new Promise(() => {}));
+
+      openCandidate("application-2");
+
+      expect(await screen.findByText("Loading candidate…")).toBeInTheDocument();
+      const list = screen.getByRole("navigation", { name: "Screening list" });
+      expect(within(list).getByRole("link", { current: "page" })).toHaveAttribute(
+        "href",
+        profileHref("application-2"),
+      );
+    });
+
+    it("is not shown without a queue", async () => {
+      harness.searchParams = new URLSearchParams("position=position-1&stages=stage-1");
+      await renderInLayout();
+
+      await waitFor(() => expect(arrow("Next candidate")).toBeInTheDocument());
+      expect(screeningList()).toBeNull();
+    });
+
+    it("is not shown when this candidate is not in the snapshot", async () => {
+      snapshot(["application-0", "application-2"]);
+      await renderInLayout();
+
+      await waitFor(() =>
+        expect(arrow("Next candidate")).toHaveAttribute(
+          "href",
+          "/candidates/application-2?position=position-1&stages=stage-1",
+        ),
+      );
+      expect(screeningList()).toBeNull();
+    });
   });
 
   it("falls back when the queue belongs to another position", async () => {

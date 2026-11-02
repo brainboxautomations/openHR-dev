@@ -6,6 +6,8 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
   Clock,
   ExternalLink,
   FileText,
@@ -41,6 +43,14 @@ export function ChevronDownIcon({ size = 16, ...props }: IconProps) {
 
 export function ChevronRightIcon({ size = 16, ...props }: IconProps) {
   return <ChevronRight size={size} aria-hidden="true" {...props} />;
+}
+
+export function ChevronsLeftIcon({ size = 16, ...props }: IconProps) {
+  return <ChevronsLeft size={size} aria-hidden="true" {...props} />;
+}
+
+export function ChevronsRightIcon({ size = 16, ...props }: IconProps) {
+  return <ChevronsRight size={size} aria-hidden="true" {...props} />;
 }
 
 export function CheckIcon({ size = 16, ...props }: IconProps) {

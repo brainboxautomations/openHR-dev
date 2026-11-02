@@ -22,7 +22,7 @@ export function ScreeningSessionProvider({ children }: { children: ReactNode }) 
   const applicationId = typeof params?.candidateId === "string" ? params.candidateId : null;
   const searchParams = useSearchParams();
 
-  const profile = useCandidateProfile(applicationId).data;
+  const profile = useCandidateProfile(applicationId, { keepPreviousWhileLoading: true }).data;
   const profilePositionId = profile?.application.positionId ?? null;
   const stages = profile?.stages ?? null;
 
