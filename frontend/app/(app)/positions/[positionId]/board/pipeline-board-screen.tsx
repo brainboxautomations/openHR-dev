@@ -851,9 +851,11 @@ function BoardColumn({
                   e.preventDefault();
                   e.stopPropagation();
                   onToggleSelect(c.id);
-                } else {
-                  onOpen(c.id, stage.id);
+                  return;
                 }
+                const button = e.target instanceof Element ? e.target.closest("button") : null;
+                if (button && e.currentTarget.contains(button)) return;
+                onOpen(c.id, stage.id);
               }}
               className={cn("transition-opacity", draggingId === c.id && "opacity-40")}
             >

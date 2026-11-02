@@ -37,6 +37,10 @@ environment variables and one-off steps are listed here. See
 - Relicensed from the PolyForm Shield License 1.0.0 to the MIT License. See
   [LICENSE](LICENSE).
 
+### Fixed
+
+- Starring a card on the board no longer marks the candidate as seen.
+
 ## [1.0.0] - 2026-10-15
 
 The first public release, source-available under the PolyForm Shield License

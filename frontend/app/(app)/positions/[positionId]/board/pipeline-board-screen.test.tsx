@@ -387,6 +387,34 @@ describe("PipelineBoardScreen opening a card", () => {
         ?.applicationIds,
     ).toEqual(["starred-1"]);
   });
+
+  it("does not treat starring a card as opening it", async () => {
+    const user = userEvent.setup();
+    renderBoard([makeCandidate({ id: "applied-1", firstName: "Fresh", seen: false })]);
+
+    await user.click(within(cardLink("Fresh Okafor")).getByRole("button", { name: "Star" }));
+
+    expect(harness.updateMutate).toHaveBeenCalledTimes(1);
+    expect(harness.updateMutate).toHaveBeenCalledWith({
+      id: "applied-1",
+      patch: { starred: true },
+    });
+    expect(readScreeningQueue(COLUMN_KEY)).toBeNull();
+    expect(sessionStorage.getItem(COLUMN_KEY)).toBeNull();
+  });
+
+  it("marks an unseen card seen and snapshots its column when its body is clicked", async () => {
+    const user = userEvent.setup();
+    renderBoard([makeCandidate({ id: "applied-1", firstName: "Fresh", seen: false })]);
+
+    await user.click(screen.getByText("Fresh Okafor"));
+
+    expect(harness.updateMutate).toHaveBeenCalledWith({
+      id: "applied-1",
+      patch: { seen: true },
+    });
+    expect(readScreeningQueue(COLUMN_KEY)?.applicationIds).toEqual(["applied-1"]);
+  });
 });
 
 describe("PipelineBoardScreen stage filter markup", () => {
