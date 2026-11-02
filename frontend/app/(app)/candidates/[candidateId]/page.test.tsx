@@ -800,6 +800,73 @@ describe("CandidateProfilePage walking a board column", () => {
     });
   });
 
+  describe("keyboard shortcuts", () => {
+    it("opens the next and previous candidates in the column with J and K", async () => {
+      const user = userEvent.setup();
+      snapshot(["application-0", "application-1", "application-2"]);
+      await renderInLayout();
+      await screen.findByText("Applied · 2 of 3 · 3 left");
+
+      await user.keyboard("j");
+      expect(harness.push).toHaveBeenLastCalledWith(profileHref("application-2"));
+
+      await user.keyboard("{ArrowLeft}");
+      expect(harness.push).toHaveBeenLastCalledWith(profileHref("application-0"));
+      expect(harness.push).toHaveBeenCalledTimes(2);
+    });
+
+    it("hints at the keys on the arrows", async () => {
+      snapshot(["application-0", "application-1", "application-2"]);
+      await renderInLayout();
+      await screen.findByText("Applied · 2 of 3 · 3 left");
+
+      expect(arrow("Previous candidate")).toHaveAttribute("title", "Previous (K)");
+      expect(arrow("Next candidate")).toHaveAttribute("title", "Next (J)");
+    });
+
+    it("does nothing while typing a note", async () => {
+      const user = userEvent.setup();
+      snapshot(["application-0", "application-1", "application-2"]);
+      await renderInLayout();
+      await screen.findByText("Applied · 2 of 3 · 3 left");
+
+      await user.type(screen.getByPlaceholderText("Write a note for the team…"), "jk");
+
+      expect(harness.push).not.toHaveBeenCalled();
+      expect(screen.getByPlaceholderText("Write a note for the team…")).toHaveValue("jk");
+    });
+
+    it("does nothing while the stage menu is open", async () => {
+      const user = userEvent.setup();
+      snapshot(["application-0", "application-1", "application-2"]);
+      await renderInLayout();
+      await screen.findByText("Applied · 2 of 3 · 3 left");
+
+      await user.click(stageButton("Applied"));
+      await user.keyboard("j{ArrowRight}");
+
+      expect(harness.push).not.toHaveBeenCalled();
+      expect(screen.getByRole("button", { name: "Shortlist" })).toBeInTheDocument();
+    });
+
+    it("is off without a queue", async () => {
+      const user = userEvent.setup();
+      harness.searchParams = new URLSearchParams("position=position-1&stages=stage-1");
+      await renderInLayout();
+      await waitFor(() =>
+        expect(arrow("Next candidate")).toHaveAttribute(
+          "href",
+          "/candidates/application-2?position=position-1&stages=stage-1",
+        ),
+      );
+
+      await user.keyboard("jk{ArrowRight}{ArrowLeft}");
+
+      expect(harness.push).not.toHaveBeenCalled();
+      expect(arrow("Next candidate")).not.toHaveAttribute("title");
+    });
+  });
+
   it("falls back when the queue belongs to another position", async () => {
     harness.searchParams = new URLSearchParams("position=position-2&queue=stage-1");
     await renderInLayout();

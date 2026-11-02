@@ -324,6 +324,7 @@ function ProfileView({
             context={navigatorContext}
             neighbours={neighbours}
             progressLabel={progressLabel}
+            shortcuts={screeningSession !== null}
           />
 
           <div className="relative">

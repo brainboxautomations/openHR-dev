@@ -1198,6 +1198,26 @@ All of this is one DOM switched by Tailwind breakpoint classes, not a
 expand control and the overlay's open control are separate buttons, each shown
 only at its own breakpoint.
 
+**Keyboard shortcuts.** While a session is active, J or ArrowRight opens the
+next candidate in the snapshot and K or ArrowLeft the previous one, the same
+targets as the arrows (which say so in their `title`), and nothing happens at
+either end. `useQueueShortcuts` is mounted once, in `CandidateScreeningLayout`,
+so it survives the page remounting on every step, and it navigates with the
+same `useNavigate().push` as auto-advance, keeping the queue in the link. A key
+is left alone when any modifier is held (so browser and OS shortcuts such as
+Cmd+ArrowLeft still work), when another handler already called
+`preventDefault`, when it is a key repeat (holding J would otherwise fire a
+navigation per repeat), during IME composition, and when focus is somewhere the
+key means something else: an input, textarea, select, contentEditable,
+`[role=textbox]`, a combobox, slider, tab list, radio group or media player. It
+is also left alone while anything layered over the page is open, detected in
+the DOM rather than by threading state through every component: `[role=dialog]`,
+`[role=alertdialog]`, `[aria-modal=true]`, `[role=menu]`, `[role=listbox]`, or
+a `FloatingMenu`, which carries `data-floating-menu` because the stage menu and
+the other popovers built on it have no ARIA role of their own. Without that
+check, pressing J with the stage menu open would leave the menu's candidate
+behind mid-decision.
+
 ### Toasts: one at a time, mounted in the app shell
 
 `ToastProvider` (`providers/toast-provider.tsx`) is mounted in
