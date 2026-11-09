@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { Fragment, useMemo, useRef, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import { useNavigate } from "@/hooks/use-navigate";
 import Link from "next/link";
@@ -36,6 +36,7 @@ import { FloatingMenu } from "@/components/molecules/floating-menu";
 import { DocxPreview } from "@/components/molecules/docx-preview";
 import { UpcomingAutomations } from "@/components/organisms/upcoming-automations";
 import { resumePreviewKind } from "@/utilities/resume-preview";
+import { splitTextLinks } from "@/utilities/text-links";
 import type {
   AnswerMedia,
   CandidateProfile,
@@ -112,6 +113,28 @@ function answerText(value: string | number | string[] | null): string {
   return s.length ? s : "—";
 }
 
+function LinkedText({ text }: { text: string }) {
+  return (
+    <>
+      {splitTextLinks(text).map((part, i) =>
+        part.kind === "link" ? (
+          <a
+            key={i}
+            href={part.href}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="break-all text-accent-11 underline-offset-2 hover:underline"
+          >
+            {part.text}
+          </a>
+        ) : (
+          <Fragment key={i}>{part.text}</Fragment>
+        ),
+      )}
+    </>
+  );
+}
+
 export default function CandidateProfilePage() {
   const params = useParams<{ candidateId: string }>();
   const applicationId = params.candidateId;
@@ -173,12 +196,15 @@ function ProfileView({
   const addNote = useAddNote(applicationId);
 
   const [tab, setTab] = useState<ContentTab>("experience");
+  const [openedTabs, setOpenedTabs] = useState<ReadonlySet<ContentTab>>(
+    () => new Set<ContentTab>(["experience"]),
+  );
   const [commTab, setCommTab] = useState<CommTab>("notes");
   const [stageMenuOpen, setStageMenuOpen] = useState(false);
   const stageMenuAnchorRef = useRef<HTMLButtonElement>(null);
   const [positionMenuOpen, setPositionMenuOpen] = useState(false);
   const positionMenuAnchorRef = useRef<HTMLButtonElement>(null);
-  const [expandedQ, setExpandedQ] = useState<string | null>(questionnaires[0]?.id ?? null);
+  const [collapsedQ, setCollapsedQ] = useState<ReadonlySet<string>>(() => new Set());
 
   const [failure, setFailure] = useState<ActionFailure | null>(null);
 
@@ -518,7 +544,10 @@ function ProfileView({
                 <button
                   key={id}
                   type="button"
-                  onClick={() => setTab(id)}
+                  onClick={() => {
+                    setTab(id);
+                    setOpenedTabs((cur) => (cur.has(id) ? cur : new Set(cur).add(id)));
+                  }}
                   className={cn(
                     "flex items-center gap-1.5 py-3.5 text-[13px] transition-colors",
                     on
@@ -543,30 +572,48 @@ function ProfileView({
           </div>
 
           <div className="flex-1 overflow-y-auto px-6 pb-8 pt-5">
-            {tab === "experience" && (
-              <ExperienceTab
-                formAnswers={application.formAnswers}
-                questionnaires={questionnaires}
-              />
+            {openedTabs.has("experience") && (
+              <div hidden={tab !== "experience"}>
+                <ExperienceTab
+                  formAnswers={application.formAnswers}
+                  questionnaires={questionnaires}
+                />
+              </div>
             )}
-            {tab === "resume" && <ResumeTab documents={documents} />}
-            {tab === "documents" && <DocumentsTab documents={documents} />}
-            {tab === "questionnaires" && (
-              <QuestionnairesTab
-                applicationId={applicationId}
-                positionId={application.positionId}
-                questionnaires={questionnaires}
-                expandedQ={expandedQ}
-                onToggle={(qid) => setExpandedQ((cur) => (cur === qid ? null : qid))}
-                onSetReminders={setReminders}
-                // Only the row being changed is busy; one shared flag used to
-                // lock every questionnaire's button at once.
-                remindersBusyId={
-                  setQuestionnaireReminders.isPending
-                    ? (setQuestionnaireReminders.variables?.responseId ?? null)
-                    : null
-                }
-              />
+            {openedTabs.has("resume") && (
+              <div hidden={tab !== "resume"}>
+                <ResumeTab documents={documents} />
+              </div>
+            )}
+            {openedTabs.has("documents") && (
+              <div hidden={tab !== "documents"}>
+                <DocumentsTab documents={documents} />
+              </div>
+            )}
+            {openedTabs.has("questionnaires") && (
+              <div hidden={tab !== "questionnaires"}>
+                <QuestionnairesTab
+                  applicationId={applicationId}
+                  positionId={application.positionId}
+                  questionnaires={questionnaires}
+                  collapsedQ={collapsedQ}
+                  onToggle={(qid) =>
+                    setCollapsedQ((cur) => {
+                      const next = new Set(cur);
+                      if (!next.delete(qid)) next.add(qid);
+                      return next;
+                    })
+                  }
+                  onSetReminders={setReminders}
+                  // Only the row being changed is busy; one shared flag used to
+                  // lock every questionnaire's button at once.
+                  remindersBusyId={
+                    setQuestionnaireReminders.isPending
+                      ? (setQuestionnaireReminders.variables?.responseId ?? null)
+                      : null
+                  }
+                />
+              </div>
             )}
           </div>
         </div>
@@ -896,7 +943,7 @@ function ExperienceTab({
         <>
           <SectionLabel className="mb-2.5 tracking-[0.1em]">SUMMARY</SectionLabel>
           <p className="mb-6 whitespace-pre-line text-[13px] leading-relaxed text-slate-700">
-            {summary}
+            <LinkedText text={summary} />
           </p>
         </>
       )}
@@ -905,7 +952,7 @@ function ExperienceTab({
         <>
           <SectionLabel className="mb-2.5 tracking-[0.1em]">WORK HISTORY</SectionLabel>
           <p className="mb-6 whitespace-pre-line text-[13px] leading-relaxed text-slate-700">
-            {workHistory}
+            <LinkedText text={workHistory} />
           </p>
         </>
       )}
@@ -914,7 +961,7 @@ function ExperienceTab({
         <>
           <SectionLabel className="mb-2.5 tracking-[0.1em]">EDUCATION</SectionLabel>
           <p className="mb-6 whitespace-pre-line text-[13px] leading-relaxed text-slate-700">
-            {education}
+            <LinkedText text={education} />
           </p>
         </>
       )}
@@ -923,7 +970,7 @@ function ExperienceTab({
         <>
           <SectionLabel className="mb-2.5 tracking-[0.1em]">COVER LETTER</SectionLabel>
           <p className="mb-6 whitespace-pre-line text-[13px] leading-relaxed text-slate-600">
-            {coverLetter}
+            <LinkedText text={coverLetter} />
           </p>
         </>
       )}
@@ -953,7 +1000,7 @@ function ExperienceTab({
               <div key={a.questionId}>
                 <div className="mb-1 text-xs font-medium text-slate-700">{a.prompt}</div>
                 <div className="rounded-lg border border-slate-100 bg-slate-50 px-2.75 py-2.5 text-xs leading-relaxed text-slate-500">
-                  {answerText(a.value)}
+                  <LinkedText text={answerText(a.value)} />
                 </div>
               </div>
             ))}
@@ -1104,7 +1151,7 @@ function QuestionnairesTab({
   applicationId,
   positionId,
   questionnaires,
-  expandedQ,
+  collapsedQ,
   onToggle,
   onSetReminders,
   remindersBusyId,
@@ -1112,7 +1159,7 @@ function QuestionnairesTab({
   applicationId: string;
   positionId: string;
   questionnaires: QuestionnaireResponseDetail[];
-  expandedQ: string | null;
+  collapsedQ: ReadonlySet<string>;
   onToggle: (id: string) => void;
   onSetReminders: (responseId: string, stopped: boolean) => void;
   remindersBusyId: string | null;
@@ -1168,7 +1215,7 @@ function QuestionnairesTab({
       {header}
       <div className="flex flex-col gap-2.5">
         {questionnaires.map((q) => {
-          const open = expandedQ === q.id;
+          const open = !collapsedQ.has(q.id);
           const complete = q.status === "completed";
           const state = questionnaireCompletionState(q, new Date());
           const action = questionnaireResendAction(q);
@@ -1305,7 +1352,7 @@ function QuestionnairesTab({
                         )
                       ) : (
                         <div className="rounded-lg border border-slate-100 bg-slate-50 px-2.75 py-2.5 text-xs leading-relaxed text-slate-500">
-                          {answerText(a.value)}
+                          <LinkedText text={answerText(a.value)} />
                         </div>
                       )}
                     </div>

@@ -472,6 +472,136 @@ describe("CandidateProfilePage questionnaire reminders", () => {
   });
 });
 
+describe("CandidateProfilePage keeps a candidate video playing", () => {
+  const completed = {
+    status: "completed" as const,
+    sentAt: "2026-02-01T10:00:00.000Z",
+    completedAt: "2026-02-02T10:00:00.000Z",
+    remindersStoppedAt: null,
+    pendingReminders: 0,
+    linkExpiresAt: null,
+    questionCount: 1,
+  };
+
+  beforeEach(() => {
+    harness.profile = {
+      ...makeProfile(),
+      questionnaires: [
+        {
+          ...completed,
+          id: "response-video",
+          name: "Paid Ads Expert",
+          context: "stage_sent",
+          answers: [
+            {
+              questionId: "q-video",
+              type: "video",
+              prompt: "Walk us through a campaign",
+              value: null,
+              media: {
+                source: "link",
+                url: "https://www.loom.com/share/abc",
+                embedUrl: "https://www.loom.com/embed/abc",
+                provider: "loom",
+                filename: null,
+                mimeType: null,
+              },
+            },
+          ],
+        },
+        {
+          ...completed,
+          id: "response-form",
+          name: "Screening questions",
+          context: "manual_sent",
+          answers: [
+            {
+              questionId: "q-salary",
+              type: "short_text",
+              prompt: "Salary expectation",
+              value: "250000",
+              media: null,
+            },
+          ],
+        },
+      ],
+    };
+  });
+
+  it("opens every questionnaire, and closing one leaves the video open", async () => {
+    const user = userEvent.setup();
+    await renderProfile();
+    await user.click(screen.getByRole("button", { name: /Questionnaires/ }));
+
+    expect(screen.getByTitle("Candidate video")).toBeInTheDocument();
+    expect(screen.getByText("Salary expectation")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /Screening questions/ }));
+
+    expect(screen.queryByText("Salary expectation")).not.toBeInTheDocument();
+    expect(screen.getByTitle("Candidate video")).toBeInTheDocument();
+  });
+
+  it("keeps the same video player when switching to another tab and back", async () => {
+    const user = userEvent.setup();
+    await renderProfile();
+    await user.click(screen.getByRole("button", { name: /Questionnaires/ }));
+    const player = screen.getByTitle("Candidate video");
+
+    await user.click(screen.getByRole("button", { name: "Experience" }));
+    expect(player).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /Questionnaires/ }));
+    expect(screen.getByTitle("Candidate video")).toBe(player);
+  });
+});
+
+describe("CandidateProfilePage links in answers", () => {
+  it("makes a web address in an answer a link that opens in a new tab", async () => {
+    harness.profile = {
+      ...makeProfile(),
+      questionnaires: [
+        {
+          id: "response-links",
+          name: "Screening questions",
+          context: "manual_sent",
+          status: "completed",
+          sentAt: "2026-02-01T10:00:00.000Z",
+          completedAt: "2026-02-02T10:00:00.000Z",
+          remindersStoppedAt: null,
+          pendingReminders: 0,
+          linkExpiresAt: null,
+          questionCount: 2,
+          answers: [
+            {
+              questionId: "q-profile",
+              type: "short_text",
+              prompt: "Profile",
+              value: "https://www.linkedin.com/in/amara/",
+              media: null,
+            },
+            {
+              questionId: "q-salary",
+              type: "short_text",
+              prompt: "Salary",
+              value: "250000",
+              media: null,
+            },
+          ],
+        },
+      ],
+    };
+    await renderProfile();
+    await userEvent.setup().click(screen.getByRole("button", { name: /Questionnaires/ }));
+
+    const link = screen.getByRole("link", { name: "https://www.linkedin.com/in/amara/" });
+    expect(link).toHaveAttribute("href", "https://www.linkedin.com/in/amara/");
+    expect(link).toHaveAttribute("target", "_blank");
+    expect(link).toHaveAttribute("rel", "noopener noreferrer");
+    expect(screen.queryByRole("link", { name: "250000" })).not.toBeInTheDocument();
+  });
+});
+
 describe("CandidateProfilePage sending a questionnaire again", () => {
   function withQuestionnaire(patch: Partial<QuestionnaireResponseDetail>) {
     harness.profile = {
